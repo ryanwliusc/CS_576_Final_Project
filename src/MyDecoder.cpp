@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES
 #include <opencv2/opencv.hpp>
 #include <filesystem>
 #include <iostream>
