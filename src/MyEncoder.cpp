@@ -16,16 +16,16 @@ namespace fs = std::filesystem;
 
 /** Declarations*/
 /** Utility function to read each frame of the video and output compressed information */
-void readVideoData(string videoPath, int width, int height, ofstream &outputFile);
+void readVideoData(string videoPath, int width, int height, ofstream &outputFile, int n1, int n2);
 
 /** DCT encoding function */
-void dctEncode(int width, int height, double ***rblocks, double ***gblocks, double ***bblocks, unsigned char *dctData);
+void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream &outputFile, vector<vector<bool>> isForeground, int n1, int n2);
 
 /** Function to compute motion vectors for macroblocks */
-void computeMotionVectors(const vector<unsigned char>& currFrame, const vector<unsigned char>& prevFrame, int width, int height, vector<vector<pair<int, int>>>& motionVectors);
+void computeMotionVectors(const vector<unsigned char> &currFrame, const vector<unsigned char> &prevFrame, int width, int height, vector<vector<pair<int, int>>> &motionVectors);
 
 /** Function to group macroblocks into background and foreground */
-void segmentForegroundBackground(const vector<vector<pair<int, int>>>& motionVectors, int widthBlocks, int heightBlocks, vector<vector<bool>>& isForeground);
+void segmentForegroundBackground(const vector<vector<pair<int, int>>> &motionVectors, int widthBlocks, int heightBlocks, vector<vector<bool>> &isForeground);
 
 int main(int argc, char **argv)
 {
@@ -49,13 +49,13 @@ int main(int argc, char **argv)
         exit(1);
     }
     outputFile << n1 << " " << n2 << "\n";
-    readVideoData(videoPath, width, height, outputFile);
+    readVideoData(videoPath, width, height, outputFile, n1, n2);
     cout << "terminated" << endl;
     return 0;
 }
 
 /** Utility function to read frames and output blocktype and DCT coefficients */
-void readVideoData(string videoPath, int width, int height, ofstream &outputFile)
+void readVideoData(string videoPath, int width, int height, ofstream &outputFile, int n1, int n2)
 {
     // Open the file in binary mode
     ifstream inputFile(videoPath, ios::binary);
@@ -77,10 +77,11 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
     while (!inputFile.eof())
     {
         // Read frame data directly in RGB interleaved format
-        inputFile.read(reinterpret_cast<char*>(rgbBuffer.data()), width * height * 3);
+        inputFile.read(reinterpret_cast<char *>(rgbBuffer.data()), width * height * 3);
 
         // Check if we actually read any data
-        if (inputFile.gcount() == 0) {
+        if (inputFile.gcount() == 0)
+        {
             break;
         }
 
@@ -92,7 +93,8 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
             // For the first frame, we can assume it's an I-frame
             // Here, you might want to process the first frame differently
             // For simplicity, we'll just write a placeholder
-            outputFile << "I-Frame data\n";
+            vector<vector<bool>> holder;
+            dctEncode(width, height, currFrame, outputFile, holder, n1, n2);
             firstFrame = false;
         }
         else
@@ -111,22 +113,8 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
             vector<vector<bool>> isForeground(heightBlocks, vector<bool>(widthBlocks, false));
             segmentForegroundBackground(motionVectors, widthBlocks, heightBlocks, isForeground);
 
-            // Here, you can process the macroblocks differently based on whether they're foreground or background
-            // For simplicity, we'll write out the block types
-            for (int i = 0; i < heightBlocks; ++i)
-            {
-                for (int j = 0; j < widthBlocks; ++j)
-                {
-                    if (isForeground[i][j])
-                    {
-                        outputFile << "Foreground Macroblock at (" << i << "," << j << ")\n";
-                    }
-                    else
-                    {
-                        outputFile << "Background Macroblock at (" << i << "," << j << ")\n";
-                    }
-                }
-            }
+            // Encode the frame
+            dctEncode(width, height, currFrame, outputFile, isForeground, n1, n2);
         }
 
         // Update prevFrame
@@ -138,7 +126,7 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
 }
 
 /** Function to compute motion vectors for macroblocks using Three-Step Search */
-void computeMotionVectors(const vector<unsigned char>& currFrame, const vector<unsigned char>& prevFrame, int width, int height, vector<vector<pair<int, int>>>& motionVectors)
+void computeMotionVectors(const vector<unsigned char> &currFrame, const vector<unsigned char> &prevFrame, int width, int height, vector<vector<pair<int, int>>> &motionVectors)
 {
     int macroblockSize = 16;
     int initialStepSize = 4; // Adjust based on your needs
@@ -169,10 +157,9 @@ void computeMotionVectors(const vector<unsigned char>& currFrame, const vector<u
                     {centerX - stepSize, centerY},
                     {centerX + stepSize, centerY},
                     {centerX, centerY - stepSize},
-                    {centerX, centerY + stepSize}
-                };
+                    {centerX, centerY + stepSize}};
 
-                for (const auto& point : searchPoints)
+                for (const auto &point : searchPoints)
                 {
                     int x = point.first;
                     int y = point.second;
@@ -222,9 +209,8 @@ void computeMotionVectors(const vector<unsigned char>& currFrame, const vector<u
     }
 }
 
-
 /** Function to group macroblocks into background and foreground */
-void segmentForegroundBackground(const vector<vector<pair<int, int>>>& motionVectors, int widthBlocks, int heightBlocks, vector<vector<bool>>& isForeground)
+void segmentForegroundBackground(const vector<vector<pair<int, int>>> &motionVectors, int widthBlocks, int heightBlocks, vector<vector<bool>> &isForeground)
 {
     // First, we need to cluster the motion vectors to find the dominant motion (background motion)
 
@@ -242,7 +228,7 @@ void segmentForegroundBackground(const vector<vector<pair<int, int>>>& motionVec
     // Find the most frequent motion vector (assumed to be background motion)
     pair<int, int> backgroundMotionVector;
     int maxFrequency = 0;
-    for (const auto& entry : motionVectorFrequency)
+    for (const auto &entry : motionVectorFrequency)
     {
         if (entry.second > maxFrequency)
         {
@@ -298,8 +284,8 @@ void segmentForegroundBackground(const vector<vector<pair<int, int>>>& motionVec
                     q.pop();
 
                     // Check 4-connected neighbors
-                    const int dx[4] = { -1, 1, 0, 0 };
-                    const int dy[4] = { 0, 0, -1, 1 };
+                    const int dx[4] = {-1, 1, 0, 0};
+                    const int dy[4] = {0, 0, -1, 1};
 
                     for (int k = 0; k < 4; ++k)
                     {
@@ -324,23 +310,57 @@ void segmentForegroundBackground(const vector<vector<pair<int, int>>>& motionVec
     // Now, you can process each connected foreground region separately if needed
 }
 
-/** DCT encoding function */
-void dctEncode(int width, int height, double ***rblocks, double ***gblocks, double ***bblocks, unsigned char *dctData)
+/** DCT encoding function, outputs coefficients per block */
+void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream &outputFile, vector<vector<bool>> isForeground, int n1, int n2)
 {
-    int blockIndex = -1;
-    // DCT encoding, get 8x8 block of original data for each rgb channel, DCT the block and put it back into the orig array
-    for (int i = 0; i < height; i += 8)
+    bool iFrame = false;
+    if (isForeground.empty())
     {
-        for (int j = 0; j < width; j += 8)
+        iFrame = true;
+    }
+
+    // DCT encoding, get 8x8 block of original data for each rgb channel, DCT the block and put it back into the orig array
+    for (int i = 0; i < height - 16; i += 8)
+    {
+        for (int j = 0; j < width - 16; j += 8)
         {
-            blockIndex += 1;
             // Mapping to top Left pixel of 8x8 block
             int mapping = (i * width + j) * 3;
+            std::vector<std::vector<int>> rblock(8, std::vector<int>(8, 0));
+            std::vector<std::vector<int>> gblock(8, std::vector<int>(8, 0));
+            std::vector<std::vector<int>> bblock(8, std::vector<int>(8, 0));
+            // Determine whether the block is a foreground or background
+            int row = i / 16;
+            int col = j / 16;
+            int n = pow(2, n1);
+            int blocktype = 0;
+            if (!iFrame)
+            {
+                if (!isForeground[row][col])
+                {
+                    n = pow(2, n2);
+                    blocktype = 2;
+                }
+                else
+                {
+                    blocktype = 1;
+                }
+            }
             for (int u = 0; u < 8; u++)
             {
                 for (int v = 0; v < 8; v++)
                 {
-                    double cu = 1, cv = 1;
+                    int index = mapping + (u * width * 3) + (v * 3);
+                    currFrame[index] /= n;
+                    currFrame[index + 1] /= n;
+                    currFrame[index + 2] /= n;
+                }
+            }
+            for (int u = 0; u < 8; u++)
+            {
+                for (int v = 0; v < 8; v++)
+                {
+                    float cu = 1, cv = 1;
                     if (u == 0)
                     {
                         cu = 1 / sqrt(2);
@@ -349,21 +369,52 @@ void dctEncode(int width, int height, double ***rblocks, double ***gblocks, doub
                     {
                         cv = 1 / sqrt(2);
                     }
-                    double c = .25 * cu * cv;
+                    float c = .25 * cu * cv;
+                    float r = 0;
+                    float g = 0;
+                    float b = 0;
                     for (int x = 0; x < 8; x++)
                     {
                         for (int y = 0; y < 8; y++)
                         {
                             int index = mapping + (x * width * 3) + (y * 3);
-                            rblocks[blockIndex][u][v] += (double)dctData[index] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
-                            gblocks[blockIndex][u][v] += (double)dctData[index + 1] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
-                            bblocks[blockIndex][u][v] += (double)dctData[index + 2] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
+                            r += currFrame[index] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
+                            g += currFrame[index + 1] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
+                            b += currFrame[index + 2] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
                         }
                     }
-                    rblocks[blockIndex][u][v] *= c;
-                    gblocks[blockIndex][u][v] *= c;
-                    bblocks[blockIndex][u][v] *= c;
+                    r *= c;
+                    g *= c;
+                    b *= c;
+                    // apply uniform quantization
+                    rblock[u][v] = r / n;
+                    gblock[u][v] = g / n;
+                    bblock[u][v] = b / n;
                 }
+            }
+            // Write coefficients to outputfile
+            for (int x = 0; x < 3; x++)
+            {
+                outputFile << blocktype << " ";
+                for (int u = 0; u < 8; u++)
+                {
+                    for (int v = 0; v < 8; v++)
+                    {
+                        if (x == 0)
+                        {
+                            outputFile << rblock[u][v] << " ";
+                        }
+                        else if (x == 1)
+                        {
+                            outputFile << gblock[u][v] << " ";
+                        }
+                        else
+                        {
+                            outputFile << bblock[u][v] << " ";
+                        }
+                    }
+                }
+                outputFile << "\n";
             }
         }
     }
