@@ -326,9 +326,9 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
         {
             // Mapping to top Left pixel of 8x8 block
             int mapping = (i * width + j) * 3;
-            std::vector<std::vector<int>> rblock(8, std::vector<int>(8, 0));
-            std::vector<std::vector<int>> gblock(8, std::vector<int>(8, 0));
-            std::vector<std::vector<int>> bblock(8, std::vector<int>(8, 0));
+            vector<vector<int>> rblock(8, vector<int>(8, 0));
+            vector<vector<int>> gblock(8, vector<int>(8, 0));
+            vector<vector<int>> bblock(8, vector<int>(8, 0));
             // Determine whether the block is a foreground or background
             int row = i / 16;
             int col = j / 16;
@@ -395,7 +395,7 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
             // Write coefficients to outputfile
             for (int x = 0; x < 3; x++)
             {
-                outputFile << blocktype << " ";
+                outputFile << blocktype << " "; //Foreground == 1, Background == 2 //What to do with blocktype == 0? (iFrame)
                 for (int u = 0; u < 8; u++)
                 {
                     for (int v = 0; v < 8; v++)

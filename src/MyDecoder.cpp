@@ -11,9 +11,15 @@ using namespace std;
 namespace fs = std::filesystem;
 
 /** Declarations*/
+vector<vector<double>> cosTableU;
+vector<vector<double>> cosTableV;
 
 /** IDCT function */
 void dctDecode(int width, int height, double ***rblocks, double ***gblocks, double ***bblocks, unsigned char *dctData);
+vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV);
+//Function for CosineTables
+vector<vector<double>> outputCosineTableV(int sizeY, int sizeX);
+vector<vector<double>> outputCosineTableU(int sizeY, int sizeX);
 
 int main(int argc, char **argv)
 {
@@ -37,7 +43,114 @@ int main(int argc, char **argv)
     exit(1);
   }
 
+  //Create Cosine Table (Having a cosine table might be faster, might not be, not sure) (What I did for assignment 3 -Colbert)
+  cosTableU = outputCosineTableU(8,8);
+  cosTableV = outputCosineTableV(8,8);
+  cout << "Finished cosine table creation" << endl;
+
   //#TODO: Decode the .cmp file and recreate the video
+  //Parse first line for n1, n2
+  int n1;
+  int n2;
+  string firstLine;
+  getline(inputFile, firstLine);
+  stringstream ss(firstLine);
+  ss >> n1 >> n2; //Parsed n1 and n2
+
+  //Parse rest of lines:
+  string line;
+  vector<vector<int>> rBlock(8, vector<int>(8));
+  vector<vector<int>> gBlock(8, vector<int>(8));
+  vector<vector<int>> bBlock(8, vector<int>(8));
+  vector<vector<int>> bufBlock(8, vector<int>(8));
+
+  //IDCT //Kinda messy but I like separating R G B streams and doing things 3 times. //Feel free to change idk
+  vector<vector<double>> IDCTRed(height, vector<double>(width));
+  vector<vector<double>> IDCTGreen(height, vector<double>(width));
+  vector<vector<double>> IDCTBlue(height, vector<double>(width));
+  int bufVal;
+  int color = 0; //r = 0 g = 1 b = 2
+  int type = -1;
+  int offsetY = 0;
+  int offsetX = 0;
+
+  int n = pow(2, n1);
+  int nn = pow(2, n2);
+
+  while(getline(inputFile, line)){
+    stringstream ssline(line);
+    //First value of each line is blocktype (foreground/background)
+    //Every three values --> Check if they are equal, if not, something might be wrong (each rgb block triplet should be the same blocktype) but probs dont need to check
+    /* probs dont need this actually
+    if (!(type1 == type2 && type2 == type3)){
+      cout << "probably something wrong with rgb block triplet type" << endl;
+    }*/
+    ssline >> bufVal;
+    for (int i = 0; i < 8; i++){
+      for (int j = 0; j < 8; j++){
+        //Parse line (64 more values), Dequantize then add to block 
+        ssline >> bufVal; 
+        if (type == 0){
+          //iframe, not sure what to do here
+        } else if(type == 1){
+          //foreground
+          bufVal *= n;
+        } else {
+          //background
+          bufVal *= nn;
+        }
+        bufBlock[i][j] = bufVal;
+      }
+    }
+    switch(color){
+      case 0:
+        rBlock = outputIDCTBlock(bufBlock, cosTableU, cosTableV);
+        for (int y = 0; y < 8; y++){
+         for (int x = 0; x < 8; x++){
+          IDCTRed[y + offsetY][x + offsetX] = rBlock[y][x];
+          }
+        }
+        break;
+      case 1:
+        gBlock = outputIDCTBlock(bufBlock, cosTableU, cosTableV);
+        for (int y = 0; y < 8; y++){
+         for (int x = 0; x < 8; x++){
+          IDCTGreen[y + offsetY][x + offsetX] = gBlock[y][x];
+          }
+        }
+        break;
+      case 2:
+        bBlock = outputIDCTBlock(bufBlock, cosTableU, cosTableV);
+        for (int y = 0; y < 8; y++){
+         for (int x = 0; x < 8; x++){
+          IDCTBlue[y + offsetY][x + offsetX] = bBlock[y][x];
+          }
+        }
+        break;
+      default:
+        color = 0;
+        offsetX += 8;
+        offsetY += 8;
+        if (offsetX >= width){
+          offsetX = 0;
+        }
+    }
+    color++;
+  }
+  inputFile.close();
+
+  //#TODO (I think this is how to do it?)
+  //Fill in RGB pixel data for each individual frame
+  //Frame size --> 960 x 540 (Could be variable? Probably dont need to account for other resolutions)
+  //Have an array of frames or something and read it one by one? (Not 100% how to do this)
+
+  //#TODO Create video player using OpenCV that plays frames with audio
+  //30 FPS, audio: 44.1 KHz
+  //Stop Function
+  //Pause Function
+  //Play Function
+  //Step Function (Step frame-by-frame)
+
   return 0;
 }
 
@@ -99,4 +212,54 @@ void dctDecode(int width, int height, double ***rblocks, double ***gblocks, doub
       }
     }
   }
+}
+
+/**Function to output 8x8 IDCT block --Colbert**/ 
+vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV) {
+    vector<vector<int>> block(8, vector<int>(8));
+    // Do the equation
+    double sum;
+    double CU;
+    double CV;
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+          sum = 0.0;
+            for (int v = 0; v < 8; v++) {
+                for (int u = 0; u < 8; u++) {
+                    if (u == 0) {
+                        CU = 1.0 / (sqrt(2.0));
+                    } else {
+                        CU = 1.0;
+                    }
+                    if (v == 0) {
+                        CV = 1.0 / (sqrt(2.0));
+                    } else {
+                        CV = 1.0;
+                    }
+                    sum += CU * CV * ogBlock[v][u] * cosTableU[u][x] * cosTableV[v][y];
+                }
+            }
+            block[y][x] = clamp((sum * 0.25), 0.0, 255.0);
+        }
+    }
+    return block;
+}
+/**Cosine Table Function**/
+vector<vector<double>> outputCosineTableV(int sizeY, int sizeX){
+  vector<vector<double>> table(sizeY, vector<double>(sizeX));
+  for (int v = 0; v < sizeY; v++) {
+      for (int y = 0; y < sizeY; y++) {
+          table[v][y] = cos((2.0 * y + 1.0) * v * M_PI / 16.0);
+        }
+      }
+  return table;
+}
+vector<vector<double>> outputCosineTableU(int sizeY, int sizeX){
+  vector<vector<double>> table(sizeY, vector<double>(sizeX));
+    for (int u = 0; u < sizeX; u++) {
+        for (int x = 0; x < sizeX; x++) {
+          table[u][x] = cos((2.0 * x + 1.0) * u * M_PI / 16.0);
+        }
+      }
+  return table;
 }
