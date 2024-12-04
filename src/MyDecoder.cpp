@@ -7,6 +7,7 @@
 #include <vector>
 #include <math.h>
 
+using namespace cv;
 using namespace std;
 namespace fs = std::filesystem;
 
@@ -43,6 +44,22 @@ int main(int argc, char **argv)
     exit(1);
   }
 
+  //openCV testing
+  //OpenCV is in BGR format
+  Mat frame(height,width, CV_8UC3);
+  Mat frameBGR;
+  while(true) {
+    inputFile.read(reinterpret_cast<char*>(frame.data), width * height * 3);
+    cvtColor(frame, frameBGR, COLOR_RGB2BGR);
+     if (inputFile.eof()) {
+          break;
+      }
+      imshow("Video", frameBGR);
+      if (waitKey(1000 / 30) == 27){
+        break;
+      }
+  }
+
   //Create Cosine Table (Having a cosine table might be faster, might not be, not sure) (What I did for assignment 3 -Colbert)
   cosTableU = outputCosineTableU(8,8);
   cosTableV = outputCosineTableV(8,8);
@@ -76,7 +93,6 @@ int main(int argc, char **argv)
 
   int n = pow(2, n1);
   int nn = pow(2, n2);
-
   while(getline(inputFile, line)){
     stringstream ssline(line);
     //First value of each line is blocktype (foreground/background)
@@ -138,9 +154,10 @@ int main(int argc, char **argv)
     color++;
   }
   inputFile.close();
-
   //#TODO (I think this is how to do it?)
   //Fill in RGB pixel data for each individual frame
+  //Probably can process frames with openCV
+  //openCV frames --> SDL maybe
   //Frame size --> 960 x 540 (Could be variable? Probably dont need to account for other resolutions)
   //Have an array of frames or something and read it one by one? (Not 100% how to do this)
 
