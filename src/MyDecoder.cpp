@@ -6,12 +6,23 @@
 #include <string>
 #include <vector>
 #include <math.h>
+#include <thread>
+#include <mutex>
+#include <chrono>
 
 using namespace cv;
 using namespace std;
 namespace fs = std::filesystem;
 
 /** Declarations*/
+//Multithread section
+queue<vector<vector<double>>> redQ;
+queue<vector<vector<double>>> greenQ;
+queue<vector<vector<double>>> blueQ;
+mutex mutexQ;
+condition_variable cvRed, cvGreen, cvBlue;
+atomic<bool> dataExists(true);
+
 vector<vector<double>> cosTableU;
 vector<vector<double>> cosTableV;
 
@@ -21,6 +32,12 @@ vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<d
 //Function for CosineTables
 vector<vector<double>> outputCosineTableV(int sizeY, int sizeX);
 vector<vector<double>> outputCosineTableU(int sizeY, int sizeX);
+vector<unsigned char> to1D(vector<vector<double>> output2D);
+vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned char> green, vector<unsigned char> blue);
+void readDataThread(ifstream &inputFile, double n, double nn);
+void redThread(vector<vector<double>> &red, int width);
+void greenThread(vector<vector<double>> &green, int width);
+void blueThread(vector<vector<double>> &blue, int width);
 
 int main(int argc, char **argv)
 {
@@ -43,7 +60,7 @@ int main(int argc, char **argv)
     cerr << "Error Opening File for Reading" << endl;
     exit(1);
   }
-
+/*
   //openCV testing
   //OpenCV is in BGR format
   Mat frame(height,width, CV_8UC3);
@@ -56,104 +73,87 @@ int main(int argc, char **argv)
       }
       imshow("Video", frameBGR);
       if (waitKey(1000 / 30) == 27){
-        break;
+        break; //Press esc to close video
       }
   }
-
+  */
   //Create Cosine Table (Having a cosine table might be faster, might not be, not sure) (What I did for assignment 3 -Colbert)
   cosTableU = outputCosineTableU(8,8);
   cosTableV = outputCosineTableV(8,8);
   cout << "Finished cosine table creation" << endl;
 
-  //#TODO: Decode the .cmp file and recreate the video
   //Parse first line for n1, n2
   int n1;
   int n2;
-  string firstLine;
-  getline(inputFile, firstLine);
-  stringstream ss(firstLine);
-  ss >> n1 >> n2; //Parsed n1 and n2
+  inputFile >> n1 >> n2; //Parsed n1 and n2
+  //cout << "n1: "<< n1 << " n2: " << n2 << endl;
 
-  //Parse rest of lines:
-  string line;
-  vector<vector<int>> rBlock(8, vector<int>(8));
-  vector<vector<int>> gBlock(8, vector<int>(8));
-  vector<vector<int>> bBlock(8, vector<int>(8));
-  vector<vector<int>> bufBlock(8, vector<int>(8));
+  //4 is there for overflow --> 544 % 8 = 0;
+  vector<vector<double>> redStream2D(1, vector<double>(width));
+  vector<vector<double>> greenStream2D(1, vector<double>(width));
+  vector<vector<double>> blueStream2D(1, vector<double>(width));
+  double n = pow(2, n1);
+  double nn = pow(2, n2);
 
-  //IDCT //Kinda messy but I like separating R G B streams and doing things 3 times. //Feel free to change idk
-  vector<vector<double>> IDCTRed(height, vector<double>(width));
-  vector<vector<double>> IDCTGreen(height, vector<double>(width));
-  vector<vector<double>> IDCTBlue(height, vector<double>(width));
-  int bufVal;
-  int color = 0; //r = 0 g = 1 b = 2
-  int type = -1;
-  int offsetY = 0;
-  int offsetX = 0;
+  thread fileRead(readDataThread, ref(inputFile), n, nn);
+  thread redThread(redThread, ref(redStream2D), width);
+  thread greenThread(greenThread, ref(greenStream2D), width);
+  thread blueThread(blueThread, ref(blueStream2D), width);
 
-  int n = pow(2, n1);
-  int nn = pow(2, n2);
-  while(getline(inputFile, line)){
-    stringstream ssline(line);
-    //First value of each line is blocktype (foreground/background)
-    //Every three values --> Check if they are equal, if not, something might be wrong (each rgb block triplet should be the same blocktype) but probs dont need to check
-    /* probs dont need this actually
-    if (!(type1 == type2 && type2 == type3)){
-      cout << "probably something wrong with rgb block triplet type" << endl;
-    }*/
-    ssline >> bufVal;
-    for (int i = 0; i < 8; i++){
-      for (int j = 0; j < 8; j++){
-        //Parse line (64 more values), Dequantize then add to block 
-        ssline >> bufVal; 
-        if (type == 0){
-          //iframe, not sure what to do here
-        } else if(type == 1){
-          //foreground
-          bufVal *= n;
-        } else {
-          //background
-          bufVal *= nn;
-        }
-        bufBlock[i][j] = bufVal;
-      }
-    }
-    switch(color){
-      case 0:
-        rBlock = outputIDCTBlock(bufBlock, cosTableU, cosTableV);
-        for (int y = 0; y < 8; y++){
-         for (int x = 0; x < 8; x++){
-          IDCTRed[y + offsetY][x + offsetX] = rBlock[y][x];
-          }
-        }
-        break;
-      case 1:
-        gBlock = outputIDCTBlock(bufBlock, cosTableU, cosTableV);
-        for (int y = 0; y < 8; y++){
-         for (int x = 0; x < 8; x++){
-          IDCTGreen[y + offsetY][x + offsetX] = gBlock[y][x];
-          }
-        }
-        break;
-      case 2:
-        bBlock = outputIDCTBlock(bufBlock, cosTableU, cosTableV);
-        for (int y = 0; y < 8; y++){
-         for (int x = 0; x < 8; x++){
-          IDCTBlue[y + offsetY][x + offsetX] = bBlock[y][x];
-          }
-        }
-        break;
-      default:
-        color = 0;
-        offsetX += 8;
-        offsetY += 8;
-        if (offsetX >= width){
-          offsetX = 0;
-        }
-    }
-    color++;
+  if(redThread.joinable()){
+    cout << "red good" << endl;
   }
+  if(greenThread.joinable()){
+    cout << "green good" << endl;
+  }
+  if(blueThread.joinable()){
+    cout << "blue good" << endl;
+  }
+
+  fileRead.join();
+  redThread.join();
+  greenThread.join();
+  blueThread.join();
+
+  cout << "Parse done" << endl;
+  //cout << "IDCT Done" << endl;
   inputFile.close();
+  /*
+  for(int i = 0; i < redStream2D.size(); i++){
+    for (int j = 0; j < redStream2D[0].size(); j++){
+       cout << "redStream2D[i][j]: " << redStream2D[i][j] << endl;
+    }
+  }*/
+  vector<unsigned char> redStream;
+  vector<unsigned char> greenStream;
+  vector<unsigned char> blueStream;
+  redStream = to1D(redStream2D);
+  greenStream = to1D(greenStream2D);
+  blueStream = to1D(blueStream2D);
+  
+  vector<unsigned char> RGBStream = transferInData(redStream, greenStream, blueStream);
+  //testing RGBStream
+  /*
+  for (int i = 0; i < RGBStream.size(); i++){
+   cout << RGBStream[i] << endl;
+  }*/
+  unsigned char* RGBp = &RGBStream[0];
+  cout << "No crash poggers" << endl;
+  
+  //openCV testing
+  //OpenCV is in BGR format
+  Mat frame(height,width, CV_8UC3);
+  Mat frameBGR;
+  while(true) {
+    //inputFile.read(reinterpret_cast<char*>(frame.data), width * height * 3);
+    //frame = imdecode(RGBStream, IMREAD_COLOR);
+    memcpy(frame.data, RGBStream.data(), width*height*3);
+    cvtColor(frame, frameBGR, COLOR_RGB2BGR);
+    imshow("Video", frameBGR);
+    if (waitKey(1000 / 30) == 27){
+      break; //Press esc to close video
+    }
+  }
   //#TODO (I think this is how to do it?)
   //Fill in RGB pixel data for each individual frame
   //Probably can process frames with openCV
@@ -279,4 +279,168 @@ vector<vector<double>> outputCosineTableU(int sizeY, int sizeX){
         }
       }
   return table;
+}
+vector<unsigned char> to1D(vector<vector<double>> output2D){
+  vector<unsigned char> buf;
+  for (int i = 0; i < output2D.size(); i++){
+    for (int j = 0; j < output2D[0].size(); j++){
+      buf.push_back(static_cast<unsigned char>((output2D[i][j])));
+    }
+  }
+  return buf;
+}
+vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned char> green, vector<unsigned char> blue){
+  vector<unsigned char> inData;
+  for (int i = 0; i < red.size(); i++) {
+    // We populate RGB values of each pixel in that order
+    // RGB.RGB.RGB and so on for all pixels
+    inData.push_back(red[i]);
+    inData.push_back(green[i]);
+    inData.push_back(blue[i]);
+  }
+  return inData;
+}
+void readDataThread(ifstream &inputFile, double n, double nn){
+  int bufVal;
+  int color = 0; //r = 0 g = 1 b = 2
+  int type = -1;
+  while(inputFile >> bufVal){
+    //First value of each line is blocktype (foreground/background)
+    vector<vector<double>> bufBlock(8, vector<double>(8));
+    type = bufVal;
+    for (int i = 0; i < 8; i++){
+      for (int j = 0; j < 8; j++){
+        //Parse line (64 more values), Dequantize then add to block
+        inputFile >> bufVal;
+        if (type == 0){
+          //iframe, not sure what to do here
+          bufVal *= n;
+        } else if(type == 1){
+          //foreground
+          bufVal *= n;
+        } else {
+          //background
+          bufVal *= nn;
+        }
+        bufBlock[i][j] = bufVal;
+      }
+    }
+    //cout << "Produced: " << color << " ---" << endl;
+    if (color == 0){
+      {
+        lock_guard<mutex> lock(mutexQ);
+        redQ.push(bufBlock);
+      }
+      cvRed.notify_one();
+    } else if (color == 1){
+      {
+        lock_guard<mutex> lock(mutexQ);
+        greenQ.push(bufBlock);
+      }
+      cvGreen.notify_one();
+    } else if (color == 2){
+      {
+        lock_guard<mutex> lock(mutexQ);
+        blueQ.push(bufBlock);
+      }
+      cvBlue.notify_one();
+    }
+    if (color < 2){
+      color++;
+    } else {
+      color = 0;
+    }
+  }
+  dataExists = false;
+}
+void redThread(vector<vector<double>> &red, int width){
+  this_thread::sleep_for(chrono::milliseconds(1000));
+  int offsetY = 0;
+  int offsetX = 0;
+  vector<vector<double>> bufBlock(8, vector<double>(8));
+  vector<double> newRow(width, 0);
+  while(true){
+    unique_lock<mutex> lock(mutexQ);
+    cvRed.wait(lock, [&] { return !redQ.empty() || !dataExists;});
+    if (redQ.empty() && !dataExists){
+      break;
+    }
+    bufBlock = redQ.front();
+    redQ.pop();
+    //cout << "color: " << color << " ---" << endl;
+    for (int i = 0; i < 8; i++){
+      for (int j = 0; j < 8; j++){
+        red[i + offsetY][j + offsetX] = bufBlock[i][j];
+        //cout << red[i + offsetY][j + offsetX] << endl;
+      }
+      red.push_back(newRow);
+    }
+    offsetX += 8;
+    //cout << "Consumed: Red" << " ---" << offsetY << endl;
+    if (offsetX == width){
+      //cout << "offSetX: " << offsetX << "  -------- offsetY:" << offsetY << endl;
+      offsetX = 0;
+      offsetY += 8;
+    }
+  }
+}
+void greenThread(vector<vector<double>> &green, int width){
+  this_thread::sleep_for(chrono::milliseconds(1000));
+  int offsetY = 0;
+  int offsetX = 0;
+  vector<vector<double>> bufBlock(8, vector<double>(8));
+  vector<double> newRow(width, 0);
+  while(true){
+    unique_lock<mutex> lock(mutexQ);
+    cvGreen.wait(lock, [&] { return !greenQ.empty() || !dataExists; });
+    if (greenQ.empty() && !dataExists){
+      break;
+    }
+    bufBlock = greenQ.front();
+    greenQ.pop();
+    //cout << "color: " << color << " ---" << endl;
+    for (int i = 0; i < 8; i++){
+      for (int j = 0; j < 8; j++){
+        green[i + offsetY][j + offsetX] = bufBlock[i][j];
+      }
+      green.push_back(newRow);
+    }
+    offsetX += 8;
+    //cout << "Consumed: Green" << " ---" << offsetY << endl;
+    if (offsetX == width){
+      //cout << "offSetX: " << offsetX << "  -------- offsetY:" << offsetY << endl;
+      offsetX = 0;
+      offsetY += 8;
+    }
+  }
+}
+void blueThread(vector<vector<double>> &blue, int width){
+  this_thread::sleep_for(chrono::milliseconds(1000));
+  int offsetY = 0;
+  int offsetX = 0;
+  vector<vector<double>> bufBlock(8, vector<double>(8));
+  vector<double> newRow(width, 0);
+  while(true){
+    unique_lock<mutex> lock(mutexQ);
+    cvBlue.wait(lock, [&] { return !blueQ.empty() || !dataExists;});
+    if (blueQ.empty() && !dataExists){
+      break;
+    }
+    bufBlock = blueQ.front();
+    blueQ.pop();
+    //cout << "color: " << color << " ---" << endl;
+    for (int i = 0; i < 8; i++){
+      for (int j = 0; j < 8; j++){
+        blue[i + offsetY][j + offsetX] = bufBlock[i][j];
+      }
+      blue.push_back(newRow);
+    }
+    offsetX += 8;
+    //cout << "Consumed: Blue" << " ---" << offsetY << endl;
+    if (offsetX == width){
+      //cout << "offSetX: " << offsetX << "  -------- offsetY:" << offsetY << endl;
+      offsetX = 0;
+      offsetY += 8;
+    }
+  }
 }
