@@ -322,9 +322,11 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
     vector<vector<vector<int>>> rblocks(8040, vector<vector<int>>(8, vector<int>(8, 0)));
     vector<vector<vector<int>>> gblocks(8040, vector<vector<int>>(8, vector<int>(8, 0)));
     vector<vector<vector<int>>> bblocks(8040, vector<vector<int>>(8, vector<int>(8, 0)));
+    /*
     vector<vector<vector<int>>> rlblocks(120, vector<vector<int>>(4, vector<int>(8, 0)));
     vector<vector<vector<int>>> glblocks(120, vector<vector<int>>(4, vector<int>(8, 0)));
     vector<vector<vector<int>>> blblocks(120, vector<vector<int>>(4, vector<int>(8, 0)));
+    */
     bool iFrame = false;
     if (isForeground.empty())
     {
@@ -332,7 +334,7 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
     }
     int blockIndex = -1;
     // DCT encoding, get 8x8 block of original data for each rgb channel, DCT the block and put it back into the orig array
-    for (int i = 0; i < height; i += 8)
+    for (int i = 0; i < height - 4; i += 8)
     {
         for (int j = 0; j < width; j += 8)
         {
@@ -341,10 +343,11 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
             int mapping = (i * width + j) * 3;
             //  handle last 4 pixels case
             int bound = 8;
+            /*
             if (i >= 536)
             {
                 bound = 4;
-            }
+            } */
             // Determine whether the block is a foreground or background
             int row = i / 16;
             int col = j / 16;
@@ -412,22 +415,24 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
                             b += currFrame[index + 2] * tu[u][x] * tv[v][y];
                         }
                     }
-                    r *= c;
-                    g *= c;
-                    b *= c;
                     // apply uniform quantization
-                    if (bound == 8)
-                    {
-                        rblocks[blockIndex][u][v] = r / n;
-                        gblocks[blockIndex][u][v] = g / n;
-                        bblocks[blockIndex][u][v] = b / n;
-                    }
+                    r = ((r * c) / n) + 0.5;
+                    g = ((g * c) / n) + 0.5;
+                    b = ((b * c) / n) + 0.5;
+                    //if (bound == 8)
+                    //{
+                    rblocks[blockIndex][u][v] = r;
+                    gblocks[blockIndex][u][v] = g;
+                    bblocks[blockIndex][u][v] = b;
+                    //}
+                    /*
                     else {
                         int bi = j / 8;
-                        rlblocks[bi][u][v] = r / n;
-                        glblocks[bi][u][v] = g / n;
-                        blblocks[bi][u][v] = b / n;
+                        rlblocks[bi][u][v] = r;
+                        glblocks[bi][u][v] = g;
+                        blblocks[bi][u][v] = b;
                     }
+                    */
                 }
             }
         }
@@ -481,6 +486,7 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
             outputFile << "\n";
         }
     }
+    /*
     // write the edge case 4x8 blocks
     for (int y = 0; y < 120; y++)
     {
@@ -509,6 +515,7 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
             outputFile << "\n";
         }
     }
+    */
 }
 
 /**Cosine Table Function**/
