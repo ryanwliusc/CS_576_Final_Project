@@ -416,14 +416,14 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
                         }
                     }
                     // apply uniform quantization
-                    r = ((r * c) / n) + 0.5;
-                    g = ((g * c) / n) + 0.5;
-                    b = ((b * c) / n) + 0.5;
+                    r = (r * c) / n;
+                    g = (g * c) / n;
+                    b = (b * c) / n;
                     //if (bound == 8)
                     //{
-                    rblocks[blockIndex][u][v] = r;
-                    gblocks[blockIndex][u][v] = g;
-                    bblocks[blockIndex][u][v] = b;
+                    rblocks[blockIndex][u][v] = round(r);
+                    gblocks[blockIndex][u][v] = round(g);
+                    bblocks[blockIndex][u][v] = round(b);
                     //}
                     /*
                     else {
