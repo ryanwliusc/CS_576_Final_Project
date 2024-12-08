@@ -10,7 +10,6 @@ if(NOT OpenCV_FOUND)
     message(FATAL_ERROR "OpenCV not found! Please set OpenCV_DIR.")
 endif()
 
-
 include_directories(${OpenCV_INCLUDE_DIRS})
 
 # Encoder executable

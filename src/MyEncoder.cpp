@@ -19,13 +19,15 @@ namespace fs = std::filesystem;
 void readVideoData(string videoPath, int width, int height, ofstream &outputFile, int n1, int n2);
 
 /** DCT encoding function */
-void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream &outputFile, vector<vector<bool>> isForeground, int n1, int n2);
+void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream &outputFile, vector<vector<bool>> isForeground, int n1, int n2, vector<vector<float>> tu, vector<vector<float>> tv);
 
 /** Function to compute motion vectors for macroblocks */
 void computeMotionVectors(const vector<unsigned char> &currFrame, const vector<unsigned char> &prevFrame, int width, int height, vector<vector<pair<int, int>>> &motionVectors);
 
 /** Function to group macroblocks into background and foreground */
 void segmentForegroundBackground(const vector<vector<pair<int, int>>> &motionVectors, int widthBlocks, int heightBlocks, vector<vector<bool>> &isForeground);
+vector<vector<float>> outputCosineTableV();
+vector<vector<float>> outputCosineTableU();
 
 int main(int argc, char **argv)
 {
@@ -66,6 +68,10 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
         exit(1);
     }
 
+    // create precalculated tables
+    vector<vector<float>> tableu = outputCosineTableU();
+    vector<vector<float>> tablev = outputCosineTableV();
+
     // Create buffer for interleaved RGB data
     vector<unsigned char> rgbBuffer(width * height * 3);
     vector<unsigned char> prevFrame(width * height * 3);
@@ -94,7 +100,7 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
             // Here, you might want to process the first frame differently
             // For simplicity, we'll just write a placeholder
             vector<vector<bool>> holder;
-            dctEncode(width, height, currFrame, outputFile, holder, n1, n2);
+            dctEncode(width, height, currFrame, outputFile, holder, n1, n2, tableu, tablev);
             firstFrame = false;
         }
         else
@@ -114,7 +120,7 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
             segmentForegroundBackground(motionVectors, widthBlocks, heightBlocks, isForeground);
 
             // Encode the frame
-            dctEncode(width, height, currFrame, outputFile, isForeground, n1, n2);
+            dctEncode(width, height, currFrame, outputFile, isForeground, n1, n2, tableu, tablev);
         }
 
         // Update prevFrame
@@ -311,24 +317,34 @@ void segmentForegroundBackground(const vector<vector<pair<int, int>>> &motionVec
 }
 
 /** DCT encoding function, outputs coefficients per block */
-void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream &outputFile, vector<vector<bool>> isForeground, int n1, int n2)
+void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream &outputFile, vector<vector<bool>> isForeground, int n1, int n2, vector<vector<float>> tu, vector<vector<float>> tv)
 {
+    vector<vector<vector<int>>> rblocks(8040, vector<vector<int>>(8, vector<int>(8, 0)));
+    vector<vector<vector<int>>> gblocks(8040, vector<vector<int>>(8, vector<int>(8, 0)));
+    vector<vector<vector<int>>> bblocks(8040, vector<vector<int>>(8, vector<int>(8, 0)));
+    vector<vector<vector<int>>> rlblocks(120, vector<vector<int>>(4, vector<int>(8, 0)));
+    vector<vector<vector<int>>> glblocks(120, vector<vector<int>>(4, vector<int>(8, 0)));
+    vector<vector<vector<int>>> blblocks(120, vector<vector<int>>(4, vector<int>(8, 0)));
     bool iFrame = false;
     if (isForeground.empty())
     {
         iFrame = true;
     }
-
+    int blockIndex = -1;
     // DCT encoding, get 8x8 block of original data for each rgb channel, DCT the block and put it back into the orig array
-    for (int i = 0; i < height - 16; i += 8)
+    for (int i = 0; i < height; i += 8)
     {
-        for (int j = 0; j < width - 16; j += 8)
+        for (int j = 0; j < width; j += 8)
         {
+            blockIndex++;
             // Mapping to top Left pixel of 8x8 block
             int mapping = (i * width + j) * 3;
-            vector<vector<int>> rblock(8, vector<int>(8, 0));
-            vector<vector<int>> gblock(8, vector<int>(8, 0));
-            vector<vector<int>> bblock(8, vector<int>(8, 0));
+            //  handle last 4 pixels case
+            int bound = 8;
+            if (i >= 536)
+            {
+                bound = 4;
+            }
             // Determine whether the block is a foreground or background
             int row = i / 16;
             int col = j / 16;
@@ -336,7 +352,13 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
             int blocktype = 0;
             if (!iFrame)
             {
-                if (!isForeground[row][col])
+                // last 8 pixels
+                if (row > 32)
+                {
+                    n = pow(2, n2);
+                    blocktype = 2;
+                }
+                else if (!isForeground[row][col])
                 {
                     n = pow(2, n2);
                     blocktype = 2;
@@ -346,7 +368,13 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
                     blocktype = 1;
                 }
             }
-            for (int u = 0; u < 8; u++)
+            else
+            {
+                // default quantize as background if i frame
+                n = pow(2, n2);
+                blocktype = 0;
+            }
+            for (int u = 0; u < bound; u++)
             {
                 for (int v = 0; v < 8; v++)
                 {
@@ -356,7 +384,7 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
                     currFrame[index + 2] /= n;
                 }
             }
-            for (int u = 0; u < 8; u++)
+            for (int u = 0; u < bound; u++)
             {
                 for (int v = 0; v < 8; v++)
                 {
@@ -373,49 +401,138 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
                     float r = 0;
                     float g = 0;
                     float b = 0;
-                    for (int x = 0; x < 8; x++)
+
+                    for (int x = 0; x < bound; x++)
                     {
                         for (int y = 0; y < 8; y++)
                         {
                             int index = mapping + (x * width * 3) + (y * 3);
-                            r += currFrame[index] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
-                            g += currFrame[index + 1] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
-                            b += currFrame[index + 2] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
+                            r += currFrame[index] * tu[u][x] * tv[v][y];
+                            g += currFrame[index + 1] * tu[u][x] * tv[v][y];
+                            b += currFrame[index + 2] * tu[u][x] * tv[v][y];
                         }
                     }
                     r *= c;
                     g *= c;
                     b *= c;
                     // apply uniform quantization
-                    rblock[u][v] = r / n;
-                    gblock[u][v] = g / n;
-                    bblock[u][v] = b / n;
-                }
-            }
-            // Write coefficients to outputfile
-            for (int x = 0; x < 3; x++)
-            {
-                outputFile << blocktype << " "; //Foreground == 1, Background == 2 //What to do with blocktype == 0? (iFrame)
-                for (int u = 0; u < 8; u++)
-                {
-                    for (int v = 0; v < 8; v++)
+                    if (bound == 8)
                     {
-                        if (x == 0)
-                        {
-                            outputFile << rblock[u][v] << " ";
-                        }
-                        else if (x == 1)
-                        {
-                            outputFile << gblock[u][v] << " ";
-                        }
-                        else
-                        {
-                            outputFile << bblock[u][v] << " ";
-                        }
+                        rblocks[blockIndex][u][v] = r / n;
+                        gblocks[blockIndex][u][v] = g / n;
+                        bblocks[blockIndex][u][v] = b / n;
+                    }
+                    else {
+                        int bi = j / 8;
+                        rlblocks[bi][u][v] = r / n;
+                        glblocks[bi][u][v] = g / n;
+                        blblocks[bi][u][v] = b / n;
                     }
                 }
-                outputFile << "\n";
             }
         }
     }
+    // Write coefficients to output file
+    for (int y = 0; y < 8040; y++)
+    {
+        int blocktype = 0;
+        int row = y / (width / 8);
+        int col = y % (width / 8);
+
+        if (!iFrame)
+        {
+            // check if past the bounds of macroblocks, 528
+            if (row >= 66)
+            {
+                blocktype = 2;
+            }
+            else if (!isForeground[row / 2][col / 2])
+            {
+                blocktype = 2;
+            }
+            else
+            {
+                blocktype = 1;
+            }
+        }
+        // Loop over RGB channels
+        for (int x = 0; x < 3; x++)
+        {
+            outputFile << blocktype << " ";
+            // Loop over 8x8 block for the current channel
+            for (int u = 0; u < 8; u++)
+            {
+                for (int v = 0; v < 8; v++)
+                {
+                    if (x == 0)
+                    {
+                        outputFile << rblocks[y][u][v] << " ";
+                    }
+                    else if (x == 1)
+                    {
+                        outputFile << gblocks[y][u][v] << " ";
+                    }
+                    else
+                    {
+                        outputFile << bblocks[y][u][v] << " ";
+                    }
+                }
+            }
+            outputFile << "\n";
+        }
+    }
+    // write the edge case 4x8 blocks
+    for (int y = 0; y < 120; y++)
+    {
+        int blocktype = 2;
+        for (int x = 0; x < 3; x++)
+        {
+            outputFile << blocktype << " ";
+            for (int u = 0; u < 4; u++)
+            {
+                for (int v = 0; v < 8; v++)
+                {
+                    if (x == 0)
+                    {
+                        outputFile << rlblocks[y][u][v] << " ";
+                    }
+                    else if (x == 1)
+                    {
+                        outputFile << glblocks[y][u][v] << " ";
+                    }
+                    else
+                    {
+                        outputFile << blblocks[y][u][v] << " ";
+                    }
+                }
+            }
+            outputFile << "\n";
+        }
+    }
+}
+
+/**Cosine Table Function**/
+vector<vector<float>> outputCosineTableV()
+{
+    vector<vector<float>> table(8, vector<float>(8));
+    for (int v = 0; v < 8; v++)
+    {
+        for (int y = 0; y < 8; y++)
+        {
+            table[v][y] = cos(((2 * y + 1) * v * M_PI) / 16);
+        }
+    }
+    return table;
+}
+vector<vector<float>> outputCosineTableU()
+{
+    vector<vector<float>> table(8, vector<float>(8));
+    for (int u = 0; u < 8; u++)
+    {
+        for (int x = 0; x < 8; x++)
+        {
+            table[u][x] = cos(((2 * x + 1) * u * M_PI) / 16);
+        }
+    }
+    return table;
 }

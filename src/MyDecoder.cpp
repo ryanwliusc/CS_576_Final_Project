@@ -9,6 +9,8 @@
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <atomic>
+#include <condition_variable>
 
 using namespace cv;
 using namespace std;
@@ -26,8 +28,6 @@ atomic<bool> dataExists(true);
 vector<vector<double>> cosTableU;
 vector<vector<double>> cosTableV;
 
-/** IDCT function */
-void dctDecode(int width, int height, double ***rblocks, double ***gblocks, double ***bblocks, unsigned char *dctData);
 vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV);
 //Function for CosineTables
 vector<vector<double>> outputCosineTableV(int sizeY, int sizeX);
@@ -96,24 +96,24 @@ int main(int argc, char **argv)
   double nn = pow(2, n2);
 
   thread fileRead(readDataThread, ref(inputFile), n, nn);
-  thread redThread(redThread, ref(redStream2D), width);
-  thread greenThread(greenThread, ref(greenStream2D), width);
-  thread blueThread(blueThread, ref(blueStream2D), width);
+  thread rThread(redThread, ref(redStream2D), width);
+  thread gThread(greenThread, ref(greenStream2D), width);
+  thread bThread(blueThread, ref(blueStream2D), width);
 
-  if(redThread.joinable()){
+  if(rThread.joinable()){
     cout << "red good" << endl;
   }
-  if(greenThread.joinable()){
+  if(gThread.joinable()){
     cout << "green good" << endl;
   }
-  if(blueThread.joinable()){
+  if(bThread.joinable()){
     cout << "blue good" << endl;
   }
 
   fileRead.join();
-  redThread.join();
-  greenThread.join();
-  blueThread.join();
+  rThread.join();
+  gThread.join();
+  bThread.join();
 
   cout << "Parse done" << endl;
   //cout << "IDCT Done" << endl;
@@ -142,7 +142,7 @@ int main(int argc, char **argv)
   
   //openCV testing
   //OpenCV is in BGR format
-  Mat frame(height,width, CV_8UC3);
+  Mat frame(height, width, CV_8UC3);
   Mat frameBGR;
   while(true) {
     //inputFile.read(reinterpret_cast<char*>(frame.data), width * height * 3);
@@ -171,65 +171,6 @@ int main(int argc, char **argv)
   return 0;
 }
 
-void dctDecode(int width, int height, double ***rblocks, double ***gblocks, double ***bblocks, unsigned char *dctData)
-{
-  // DCT decoding, get 8x8 block of original data for each rgb channel, IDCT the block and put it back into the orig array
-  int blockIndex = -1;
-  for (int i = 0; i < height; i += 8)
-  {
-    for (int j = 0; j < width; j += 8)
-    {
-      blockIndex += 1;
-      // Mapping to top Left pixel of 8x8 block
-      int mapping = (i * width + j) * 3;
-
-      double rblock[8][8] = {0};
-      double gblock[8][8] = {0};
-      double bblock[8][8] = {0};
-
-      // apply IDCT using m coefficients
-      for (int x = 0; x < 8; x++)
-      {
-        for (int y = 0; y < 8; y++)
-        {
-          for (int u = 0; u < 8; u++)
-          {
-            for (int v = 0; v < 8; v++)
-            {
-              double cu = 1, cv = 1;
-              if (u == 0)
-              {
-                cu = 1 / sqrt(2);
-              }
-              if (v == 0)
-              {
-                cv = 1 / sqrt(2);
-              }
-              rblock[x][y] += cu * cv * rblocks[blockIndex][u][v] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
-              gblock[x][y] += cu * cv * gblocks[blockIndex][u][v] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
-              bblock[x][y] += cu * cv * bblocks[blockIndex][u][v] * cos(((2 * x + 1) * u * M_PI) / 16) * cos(((2 * y + 1) * v * M_PI) / 16);
-            }
-          }
-          rblock[x][y] *= .25;
-          gblock[x][y] *= .25;
-          bblock[x][y] *= .25;
-        }
-      }
-      // transfer decoded values back to dctData
-      for (int u = 0; u < 8; u++)
-      {
-        for (int v = 0; v < 8; v++)
-        {
-          int pixel = mapping + (u * width * 3) + (v * 3);
-          // accout for overflow and also we round to the nearest whole number based on decimal
-          dctData[pixel] = min(max((int)(rblock[u][v] + 0.5), 0), 255);
-          dctData[pixel + 1] = min(max((int)(gblock[u][v] + 0.5), 0), 255);
-          dctData[pixel + 2] = min(max((int)(bblock[u][v] + 0.5), 0), 255);
-        }
-      }
-    }
-  }
-}
 
 /**Function to output 8x8 IDCT block --Colbert**/ 
 vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV) {
