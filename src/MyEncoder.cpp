@@ -381,16 +381,6 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
             {
                 for (int v = 0; v < 8; v++)
                 {
-                    int index = mapping + (u * width * 3) + (v * 3);
-                    currFrame[index] /= n;
-                    currFrame[index + 1] /= n;
-                    currFrame[index + 2] /= n;
-                }
-            }
-            for (int u = 0; u < bound; u++)
-            {
-                for (int v = 0; v < 8; v++)
-                {
                     float cu = 1, cv = 1;
                     if (u == 0)
                     {
