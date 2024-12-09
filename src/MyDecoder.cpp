@@ -18,10 +18,10 @@ namespace fs = std::filesystem;
 
 /** Declarations*/
 //Multithread section
-queue<vector<vector<double>>> redQ;
-queue<vector<vector<double>>> greenQ;
-queue<vector<vector<double>>> blueQ;
-mutex mutexQ;
+deque<vector<vector<int>>> redQ;
+deque<vector<vector<int>>> greenQ;
+deque<vector<vector<int>>> blueQ;
+mutex redMut, greenMut, blueMut;
 condition_variable cvRed, cvGreen, cvBlue;
 atomic<bool> dataExists(true);
 
@@ -32,19 +32,19 @@ vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<d
 //Function for CosineTables
 vector<vector<double>> outputCosineTableV(int sizeY, int sizeX);
 vector<vector<double>> outputCosineTableU(int sizeY, int sizeX);
-vector<unsigned char> to1D(vector<vector<double>> output2D);
+vector<unsigned char> to1D(vector<vector<int>> &output2D);
 vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned char> green, vector<unsigned char> blue);
 void readDataThread(ifstream &inputFile, double n, double nn);
-void redThread(vector<vector<double>> &red, int width);
-void greenThread(vector<vector<double>> &green, int width);
-void blueThread(vector<vector<double>> &blue, int width);
+void redThread(vector<vector<int>> &red, int width);
+void greenThread(vector<vector<int>> &green, int width);
+void blueThread(vector<vector<int>> &blue, int width);
 
 int main(int argc, char **argv)
 {
   if (argc != 3)
   {
-    cerr << "The executable should be invoked with exactly one filepath "
-            "argument. Example ./MyDecoder 'input_video/cmp' input_audio.wav"
+    cerr << "The executable should be invoked with exactly two filepath "
+            "arguments. Example ./MyDecoder 'input_video/cmp' input_audio.wav"
          << endl;
     exit(1);
   }
@@ -89,9 +89,9 @@ int main(int argc, char **argv)
   //cout << "n1: "<< n1 << " n2: " << n2 << endl;
 
   //4 is there for overflow --> 544 % 8 = 0;
-  vector<vector<double>> redStream2D(1, vector<double>(width));
-  vector<vector<double>> greenStream2D(1, vector<double>(width));
-  vector<vector<double>> blueStream2D(1, vector<double>(width));
+  vector<vector<int>> redStream2D;
+  vector<vector<int>> greenStream2D;
+  vector<vector<int>> blueStream2D;
   double n = pow(2, n1);
   double nn = pow(2, n2);
 
@@ -99,6 +99,7 @@ int main(int argc, char **argv)
   thread rThread(redThread, ref(redStream2D), width);
   thread gThread(greenThread, ref(greenStream2D), width);
   thread bThread(blueThread, ref(blueStream2D), width);
+  
 
   if(rThread.joinable()){
     cout << "red good" << endl;
@@ -121,7 +122,17 @@ int main(int argc, char **argv)
   /*
   for(int i = 0; i < redStream2D.size(); i++){
     for (int j = 0; j < redStream2D[0].size(); j++){
-       cout << "redStream2D[i][j]: " << redStream2D[i][j] << endl;
+       cout << "redStream2D["<<i<<"]["<<j<<"]: " << redStream2D[i][j] << endl;
+    }
+  }
+  for(int i = 0; i < greenStream2D.size(); i++){
+    for (int j = 0; j < greenStream2D[i].size(); j++){
+       cout << "greenStream2D["<<i<<"]["<<j<<"]: " << greenStream2D[i][j] << endl;
+    }
+  }
+  for(int i = 0; i < blueStream2D.size(); i++){
+    for (int j = 0; j < blueStream2D[i].size(); j++){
+       cout << "blueStream2D["<<i<<"]["<<j<<"]: " << blueStream2D[i][j] << endl;
     }
   }*/
   vector<unsigned char> redStream;
@@ -130,6 +141,7 @@ int main(int argc, char **argv)
   redStream = to1D(redStream2D);
   greenStream = to1D(greenStream2D);
   blueStream = to1D(blueStream2D);
+  cout<<"to 1D done" << endl;
   
   vector<unsigned char> RGBStream = transferInData(redStream, greenStream, blueStream);
   //testing RGBStream
@@ -137,29 +149,62 @@ int main(int argc, char **argv)
   for (int i = 0; i < RGBStream.size(); i++){
    cout << RGBStream[i] << endl;
   }*/
-  unsigned char* RGBp = &RGBStream[0];
   cout << "No crash poggers" << endl;
+  cout << "RGBStream size = " << RGBStream.size() << endl;
   
   //openCV testing
   //OpenCV is in BGR format
-  Mat frame(height, width, CV_8UC3);
-  Mat frameBGR;
-  while(true) {
-    //inputFile.read(reinterpret_cast<char*>(frame.data), width * height * 3);
-    //frame = imdecode(RGBStream, IMREAD_COLOR);
-    memcpy(frame.data, RGBStream.data(), width*height*3);
+  int frameSize = width * height * 3;
+  // Check if the input data size is valid
+  int added = 0;
+  if (RGBStream.size() % frameSize != 0) {
+      cout << "Error: RGB stream size is not divisible by frame size!" << endl;
+      while (!(RGBStream.size() % frameSize == 0)){
+        //RGBStream.push_back(1);
+        RGBStream.pop_back();
+        added++;
+        for (int i = 0; i < 63; i++){
+          RGBStream.pop_back();
+          added++;
+        }
+      }
+  }
+  //cout << "added: " << added << " more values to fill out 960x540" << endl;
+  cout << "removed: " << added << " values to get to 960x540" << endl;
+  // Calculate total number of frames
+  int totalFrames = RGBStream.size() / frameSize;
+  
+ int index = 0;
+ namedWindow("Video", WINDOW_NORMAL);
+ resizeWindow("Video", width, height);
+ while (true){
+    const uint8_t* frameData = &RGBStream[index * frameSize];
+    Mat frame(height, width, CV_8UC3, const_cast<uint8_t*>(frameData));
+    Mat frameBGR;
     cvtColor(frame, frameBGR, COLOR_RGB2BGR);
     imshow("Video", frameBGR);
     if (waitKey(1000 / 30) == 27){
+      //1000ms/ 30fps
       break; //Press esc to close video
+    } 
+    if (index < totalFrames){
+      index++;
+    } else {
+      index=0;
     }
-  }
+ }
+  destroyAllWindows();
+    //inputFile.read(reinterpret_cast<char*>(frame.data), width * height * 3);
+    //frame = imdecode(RGBStream, IMREAD_COLOR);
+    //memcpy(frame.data, RGBStream.data(), width * height * 3);
+    //cvtColor(frame, frameBGR, COLOR_RGB2BGR);
+
+
   //#TODO (I think this is how to do it?)
   //Fill in RGB pixel data for each individual frame
   //Probably can process frames with openCV
   //openCV frames --> SDL maybe
   //Frame size --> 960 x 540 (Could be variable? Probably dont need to account for other resolutions)
-  //Have an array of frames or something and read it one by one? (Not 100% how to do this)
 
   //#TODO Create video player using OpenCV that plays frames with audio
   //30 FPS, audio: 44.1 KHz
@@ -197,7 +242,7 @@ vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<d
                     sum += CU * CV * ogBlock[v][u] * cosTableU[u][x] * cosTableV[v][y];
                 }
             }
-            block[y][x] = clamp((sum * 0.25), 0.0, 255.0);
+            block[y][x] = static_cast<int> (clamp((sum * 0.25), 0.0, 255.0));
         }
     }
     return block;
@@ -221,10 +266,10 @@ vector<vector<double>> outputCosineTableU(int sizeY, int sizeX){
       }
   return table;
 }
-vector<unsigned char> to1D(vector<vector<double>> output2D){
+vector<unsigned char> to1D(vector<vector<int>> &output2D){
   vector<unsigned char> buf;
   for (int i = 0; i < output2D.size(); i++){
-    for (int j = 0; j < output2D[0].size(); j++){
+    for (int j = 0; j < output2D[i].size(); j++){
       buf.push_back(static_cast<unsigned char>((output2D[i][j])));
     }
   }
@@ -247,7 +292,7 @@ void readDataThread(ifstream &inputFile, double n, double nn){
   int type = -1;
   while(inputFile >> bufVal){
     //First value of each line is blocktype (foreground/background)
-    vector<vector<double>> bufBlock(8, vector<double>(8));
+    vector<vector<int>> bufBlock(8, vector<int>(8));
     type = bufVal;
     for (int i = 0; i < 8; i++){
       for (int j = 0; j < 8; j++){
@@ -266,23 +311,25 @@ void readDataThread(ifstream &inputFile, double n, double nn){
         bufBlock[i][j] = bufVal;
       }
     }
-    //cout << "Produced: " << color << " ---" << endl;
     if (color == 0){
       {
-        lock_guard<mutex> lock(mutexQ);
-        redQ.push(bufBlock);
+        unique_lock<mutex> lock(redMut);
+        redQ.push_back(bufBlock);
+        lock.unlock();
       }
       cvRed.notify_one();
     } else if (color == 1){
       {
-        lock_guard<mutex> lock(mutexQ);
-        greenQ.push(bufBlock);
+       unique_lock<mutex> lock(greenMut);
+        greenQ.push_back(bufBlock);
+        lock.unlock();
       }
       cvGreen.notify_one();
     } else if (color == 2){
       {
-        lock_guard<mutex> lock(mutexQ);
-        blueQ.push(bufBlock);
+        unique_lock<mutex> lock(blueMut);
+        blueQ.push_back(bufBlock);
+        lock.unlock();
       }
       cvBlue.notify_one();
     }
@@ -293,95 +340,124 @@ void readDataThread(ifstream &inputFile, double n, double nn){
     }
   }
   dataExists = false;
+  cvRed.notify_one();
+  cvGreen.notify_one();
+  cvBlue.notify_one();
 }
-void redThread(vector<vector<double>> &red, int width){
+void redThread(vector<vector<int>> &red, int width){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
-  vector<vector<double>> bufBlock(8, vector<double>(8));
-  vector<double> newRow(width, 0);
+  int test = 0;
+  bool nextRow = true;
   while(true){
-    unique_lock<mutex> lock(mutexQ);
+    {
+    unique_lock<mutex> lock(redMut);
     cvRed.wait(lock, [&] { return !redQ.empty() || !dataExists;});
     if (redQ.empty() && !dataExists){
       break;
-    }
-    bufBlock = redQ.front();
-    redQ.pop();
-    //cout << "color: " << color << " ---" << endl;
+    } 
+    vector<vector<int>> &bufBlock = redQ.front();
     for (int i = 0; i < 8; i++){
-      for (int j = 0; j < 8; j++){
-        red[i + offsetY][j + offsetX] = bufBlock[i][j];
-        //cout << red[i + offsetY][j + offsetX] << endl;
+      if(nextRow){
+        red.push_back(vector<int>());
       }
-      red.push_back(newRow);
+      for (int j = 0; j < 8; j++){
+        red[i+offsetY].push_back(bufBlock[i][j]);
+      }
+    }
+    redQ.pop_front();
     }
     offsetX += 8;
-    //cout << "Consumed: Red" << " ---" << offsetY << endl;
-    if (offsetX == width){
-      //cout << "offSetX: " << offsetX << "  -------- offsetY:" << offsetY << endl;
+    //cout << "Consumed: Red" << " ---" << test << endl;
+    if (offsetX >= width){
       offsetX = 0;
-      offsetY += 8;
+      offsetY += 7;
+      nextRow = true;
+    } else {
+      nextRow = false;
     }
+    if (test % 80000 == 0){
+      cout << "Red Check: " << offsetY << endl;
+    }
+    test++;
   }
 }
-void greenThread(vector<vector<double>> &green, int width){
+void greenThread(vector<vector<int>> &green, int width){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
-  vector<vector<double>> bufBlock(8, vector<double>(8));
-  vector<double> newRow(width, 0);
+  int test = 0;
+  bool nextRow = true;
   while(true){
-    unique_lock<mutex> lock(mutexQ);
-    cvGreen.wait(lock, [&] { return !greenQ.empty() || !dataExists; });
+    {
+    unique_lock<mutex> lock(greenMut);
+    cvGreen.wait(lock, [&] { return !greenQ.empty() || !dataExists;});
     if (greenQ.empty() && !dataExists){
       break;
-    }
-    bufBlock = greenQ.front();
-    greenQ.pop();
-    //cout << "color: " << color << " ---" << endl;
+    } 
+    vector<vector<int>> &bufBlock = greenQ.front();
     for (int i = 0; i < 8; i++){
-      for (int j = 0; j < 8; j++){
-        green[i + offsetY][j + offsetX] = bufBlock[i][j];
+      if(nextRow){
+        green.push_back(vector<int>());
       }
-      green.push_back(newRow);
+      for (int j = 0; j < 8; j++){
+        green[i+offsetY].push_back(bufBlock[i][j]);
+      }
+    }
+    greenQ.pop_front();
     }
     offsetX += 8;
-    //cout << "Consumed: Green" << " ---" << offsetY << endl;
-    if (offsetX == width){
-      //cout << "offSetX: " << offsetX << "  -------- offsetY:" << offsetY << endl;
+    //cout << "Consumed: Green" << " ---" << test << endl;
+    if (offsetX >= width){
       offsetX = 0;
-      offsetY += 8;
+      offsetY += 7;
+      nextRow = true;
+    } else {
+      nextRow = false;
     }
+    if (test % 80000 == 0){
+      cout << "Green Check: " << offsetY << endl;
+    }
+    test++;
   }
 }
-void blueThread(vector<vector<double>> &blue, int width){
+void blueThread(vector<vector<int>> &blue, int width){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
-  vector<vector<double>> bufBlock(8, vector<double>(8));
-  vector<double> newRow(width, 0);
+  bool nextRow = true;
+  int test = 0;
   while(true){
-    unique_lock<mutex> lock(mutexQ);
+    {
+    unique_lock<mutex> lock(blueMut);
     cvBlue.wait(lock, [&] { return !blueQ.empty() || !dataExists;});
     if (blueQ.empty() && !dataExists){
       break;
     }
-    bufBlock = blueQ.front();
-    blueQ.pop();
-    //cout << "color: " << color << " ---" << endl;
+    vector<vector<int>>  &bufBlock = blueQ.front();
     for (int i = 0; i < 8; i++){
-      for (int j = 0; j < 8; j++){
-        blue[i + offsetY][j + offsetX] = bufBlock[i][j];
+      if(nextRow){
+        blue.push_back(vector<int>());
       }
-      blue.push_back(newRow);
+      for (int j = 0; j < 8; j++){
+        blue[i+offsetY].push_back(bufBlock[i][j]);
+      }
+    }
+    blueQ.pop_front();
     }
     offsetX += 8;
-    //cout << "Consumed: Blue" << " ---" << offsetY << endl;
-    if (offsetX == width){
-      //cout << "offSetX: " << offsetX << "  -------- offsetY:" << offsetY << endl;
+    //cout << "Consumed: Blue" << " ---" << test << endl;
+    if (offsetX >= width){
       offsetX = 0;
-      offsetY += 8;
+      offsetY += 7;
+      nextRow = true;
+    } else {
+      nextRow = false;
     }
+    if (test % 80000 == 0){
+      cout << "Blue Check: " << offsetY << endl;
+    }
+    test++;
   }
 }
