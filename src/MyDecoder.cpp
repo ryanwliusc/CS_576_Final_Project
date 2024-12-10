@@ -382,7 +382,7 @@ void readDataThread(ifstream &inputFile, double n, double nn){
   cvGreen.notify_one();
   cvBlue.notify_one();
 }
-void redThread(vector<vector<int>> &red, int width){
+void redThread(vector<vector<double>> &red, int width){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
@@ -421,7 +421,7 @@ void redThread(vector<vector<int>> &red, int width){
     test++;
   }
 }
-void greenThread(vector<vector<int>> &green, int width){
+void greenThread(vector<vector<double>> &green, int width){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
@@ -460,7 +460,7 @@ void greenThread(vector<vector<int>> &green, int width){
     test++;
   }
 }
-void blueThread(vector<vector<int>> &blue, int width){
+void blueThread(vector<vector<double>> &blue, int width){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
