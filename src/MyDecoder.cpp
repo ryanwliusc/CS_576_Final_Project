@@ -18,9 +18,10 @@ namespace fs = std::filesystem;
 
 /** Declarations*/
 //Multithread section
-deque<vector<vector<int>>> redQ;
-deque<vector<vector<int>>> greenQ;
-deque<vector<vector<int>>> blueQ;
+deque<vector<vector<double>>> redQ;
+deque<vector<vector<double>>> greenQ;
+deque<vector<vector<double>>> blueQ;
+
 mutex redMut, greenMut, blueMut;
 condition_variable cvRed, cvGreen, cvBlue;
 atomic<bool> dataExists(true);
@@ -28,11 +29,11 @@ atomic<bool> dataExists(true);
 vector<vector<double>> cosTableU;
 vector<vector<double>> cosTableV;
 
-vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV);
+vector<vector<double>> outputIDCTBlock(vector<vector<double>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV);
 //Function for CosineTables
 vector<vector<double>> outputCosineTableV(int sizeY, int sizeX);
 vector<vector<double>> outputCosineTableU(int sizeY, int sizeX);
-vector<unsigned char> to1D(vector<vector<int>> &output2D);
+vector<unsigned char> to1D(vector<vector<double>> &output2D);
 vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned char> green, vector<unsigned char> blue);
 void readDataThread(ifstream &inputFile, double n, double nn);
 void redThread(vector<vector<int>> &red, int width);
@@ -49,7 +50,7 @@ int main(int argc, char **argv)
     exit(1);
   }
   int width = 960;
-  int height = 540;
+  int height = 536;
   string videoPath = argv[1];
   string audioPath = argv[2];
   // Open the file in binary mode
@@ -89,9 +90,9 @@ int main(int argc, char **argv)
   //cout << "n1: "<< n1 << " n2: " << n2 << endl;
 
   //4 is there for overflow --> 544 % 8 = 0;
-  vector<vector<int>> redStream2D;
-  vector<vector<int>> greenStream2D;
-  vector<vector<int>> blueStream2D;
+  vector<vector<double>> redStream2D;
+  vector<vector<double>> greenStream2D;
+  vector<vector<double>> blueStream2D;
   double n = pow(2, n1);
   double nn = pow(2, n2);
 
@@ -170,19 +171,19 @@ int main(int argc, char **argv)
       }
   }
   //cout << "added: " << added << " more values to fill out 960x540" << endl;
-  cout << "removed: " << added << " values to get to 960x540" << endl;
+  cout << "removed: " << added << " values to get to 960x536" << endl;
   // Calculate total number of frames
   int totalFrames = RGBStream.size() / frameSize;
   
- int index = 0;
- namedWindow("Video", WINDOW_NORMAL);
- resizeWindow("Video", width, height);
- while (true){
+  int index = 0;
+  namedWindow("Video", WINDOW_NORMAL);
+  resizeWindow("Video", width, height);
+  while (true){
     const uint8_t* frameData = &RGBStream[index * frameSize];
     Mat frame(height, width, CV_8UC3, const_cast<uint8_t*>(frameData));
-    Mat frameBGR;
-    cvtColor(frame, frameBGR, COLOR_RGB2BGR);
-    imshow("Video", frameBGR);
+    //Mat frameBGR;
+    //cvtColor(frame, frameBGR, COLOR_RGB2BGR);
+    imshow("Video", frame);
     if (waitKey(1000 / 30) == 27){
       //1000ms/ 30fps
       break; //Press esc to close video
@@ -218,8 +219,8 @@ int main(int argc, char **argv)
 
 
 /**Function to output 8x8 IDCT block --Colbert**/ 
-vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV) {
-    vector<vector<int>> block(8, vector<int>(8));
+vector<vector<double>> outputIDCTBlock(vector<vector<double>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV) {
+    vector<vector<double>> block(8, vector<double>(8));
     // Do the equation
     double sum;
     double CU;
@@ -242,7 +243,7 @@ vector<vector<int>> outputIDCTBlock(vector<vector<int>> ogBlock, vector<vector<d
                     sum += CU * CV * ogBlock[v][u] * cosTableU[u][x] * cosTableV[v][y];
                 }
             }
-            block[y][x] = static_cast<int> (clamp((sum * 0.25), 0.0, 255.0));
+            block[y][x] = static_cast<double> (clamp((sum * 0.25), 0.0, 255.0));
         }
     }
     return block;
@@ -266,7 +267,7 @@ vector<vector<double>> outputCosineTableU(int sizeY, int sizeX){
       }
   return table;
 }
-vector<unsigned char> to1D(vector<vector<int>> &output2D){
+vector<unsigned char> to1D(vector<vector<double>> &output2D){
   vector<unsigned char> buf;
   for (int i = 0; i < output2D.size(); i++){
     for (int j = 0; j < output2D[i].size(); j++){
@@ -278,22 +279,25 @@ vector<unsigned char> to1D(vector<vector<int>> &output2D){
 vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned char> green, vector<unsigned char> blue){
   vector<unsigned char> inData;
   for (int i = 0; i < red.size(); i++) {
-    // We populate RGB values of each pixel in that order
-    // RGB.RGB.RGB and so on for all pixels
-    inData.push_back(red[i]);
-    inData.push_back(green[i]);
+    // We populate BGR values of each pixel in that order
+    // BGR.BGR.BGR and so on for all pixels
+    //OpenCV wants BGR
     inData.push_back(blue[i]);
+    inData.push_back(green[i]);
+    inData.push_back(red[i]);
   }
   return inData;
 }
 void readDataThread(ifstream &inputFile, double n, double nn){
-  int bufVal;
+  double bufVal;
   int color = 0; //r = 0 g = 1 b = 2
   int type = -1;
   while(inputFile >> bufVal){
     //First value of each line is blocktype (foreground/background)
-    vector<vector<int>> bufBlock(8, vector<int>(8));
-    type = bufVal;
+    vector<vector<double>> bufBlock(8, vector<double>(8));
+    vector<vector<double>> IDCTBlock(8, vector<double>(8));
+    type = static_cast<int> (bufVal);
+
     for (int i = 0; i < 8; i++){
       for (int j = 0; j < 8; j++){
         //Parse line (64 more values), Dequantize then add to block
@@ -311,24 +315,25 @@ void readDataThread(ifstream &inputFile, double n, double nn){
         bufBlock[i][j] = bufVal;
       }
     }
+    IDCTBlock = outputIDCTBlock(bufBlock, cosTableU, cosTableV);
     if (color == 0){
       {
         unique_lock<mutex> lock(redMut);
-        redQ.push_back(bufBlock);
+        redQ.push_back(IDCTBlock);
         lock.unlock();
       }
       cvRed.notify_one();
     } else if (color == 1){
       {
        unique_lock<mutex> lock(greenMut);
-        greenQ.push_back(bufBlock);
+        greenQ.push_back(IDCTBlock);
         lock.unlock();
       }
       cvGreen.notify_one();
     } else if (color == 2){
       {
         unique_lock<mutex> lock(blueMut);
-        blueQ.push_back(bufBlock);
+        blueQ.push_back(IDCTBlock);
         lock.unlock();
       }
       cvBlue.notify_one();
@@ -357,10 +362,10 @@ void redThread(vector<vector<int>> &red, int width){
     if (redQ.empty() && !dataExists){
       break;
     } 
-    vector<vector<int>> &bufBlock = redQ.front();
+    vector<vector<double>> &bufBlock = redQ.front();
     for (int i = 0; i < 8; i++){
       if(nextRow){
-        red.push_back(vector<int>());
+        red.push_back(vector<double>());
       }
       for (int j = 0; j < 8; j++){
         red[i+offsetY].push_back(bufBlock[i][j]);
@@ -396,10 +401,10 @@ void greenThread(vector<vector<int>> &green, int width){
     if (greenQ.empty() && !dataExists){
       break;
     } 
-    vector<vector<int>> &bufBlock = greenQ.front();
+    vector<vector<double>> &bufBlock = greenQ.front();
     for (int i = 0; i < 8; i++){
       if(nextRow){
-        green.push_back(vector<int>());
+        green.push_back(vector<double>());
       }
       for (int j = 0; j < 8; j++){
         green[i+offsetY].push_back(bufBlock[i][j]);
@@ -435,10 +440,10 @@ void blueThread(vector<vector<int>> &blue, int width){
     if (blueQ.empty() && !dataExists){
       break;
     }
-    vector<vector<int>>  &bufBlock = blueQ.front();
+    vector<vector<double>>  &bufBlock = blueQ.front();
     for (int i = 0; i < 8; i++){
       if(nextRow){
-        blue.push_back(vector<int>());
+        blue.push_back(vector<double>());
       }
       for (int j = 0; j < 8; j++){
         blue[i+offsetY].push_back(bufBlock[i][j]);
