@@ -11,6 +11,11 @@
 #include <chrono>
 #include <atomic>
 #include <condition_variable>
+//Audio only works on Windows
+#include <windows.h>
+#include <Mmsystem.h>
+#include <mciapi.h>
+#pragma comment(lib, "winmm.lib")
 
 using namespace cv;
 using namespace std;
@@ -28,7 +33,7 @@ atomic<bool> dataExists(true);
 vector<vector<double>> cosTableU;
 vector<vector<double>> cosTableV;
 
-vector<vector<double>> outputIDCTBlock(vector<vector<double>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV);
+void outputIDCTBlock(vector<vector<double>> &ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV, vector<vector<double>> &outBlock);
 //Function for CosineTables
 vector<vector<double>> outputCosineTableV(int sizeY, int sizeX);
 vector<vector<double>> outputCosineTableU(int sizeY, int sizeX);
@@ -173,11 +178,19 @@ int main(int argc, char **argv)
   }
   //cout << "added: " << added << " more values to fill out 960x540" << endl;
   cout << "removed: " << added << " values to get to 960x536" << endl;
-  
+
+  /*Audio Stuff https://stackoverflow.com/questions/22253074/how-to-play-or-open-mp3-or-wav-sound-file-in-c-program*/
+  string audioAlias = "open " + audioPath + " type waveaudio alias audio";
+  MCIERROR audioCheck = mciSendString(audioAlias.c_str(), NULL, 0, NULL);
+  if (audioCheck != 0){
+    cerr << "Error opening audio file" << endl;
+  }
+
   int index = 0;
   bool paused = false;
   namedWindow("Video", WINDOW_NORMAL);
   resizeWindow("Video", width, height);
+  setWindowProperty("Video", WND_PROP_TOPMOST, 1);
   /* To fix fps:
    Found on https://github.com/stephanecharette/MoveDetect/blob/master/src-test/main.cpp#L127-L139
    */
@@ -188,13 +201,19 @@ int main(int argc, char **argv)
   std::chrono::high_resolution_clock::time_point			next_frame_time_point	= start_time + duration;
 
   //PlayBack Loop
+  TCHAR tch[100];
+  mciSendString("play audio notify", NULL, 0, NULL);
   while (true){
     const std::chrono::high_resolution_clock::time_point now =std::chrono::high_resolution_clock::now();
     const int milliseconds_to_wait =std::chrono::duration_cast<std::chrono::milliseconds>(next_frame_time_point - now).count();
     const uint8_t* frameData = &RGBStream[index * frameSize];
     Mat frame(height, width, CV_8UC3, const_cast<uint8_t*>(frameData));
+    
+    int audioPos = static_cast<int>((index / fps) * 1000);
     if (!paused) {
+      //Video
       imshow("Video", frame);
+
       if (index < totalFrames) {
         index++;
       } else {
@@ -204,24 +223,42 @@ int main(int argc, char **argv)
     if (milliseconds_to_wait > 0) {
       int key = waitKey(milliseconds_to_wait);
       if (key == 27) {
+        mciSendString("stop audio", NULL, 0, NULL);
+        mciSendString("close audio", NULL, 0, NULL);
         break;  // Press esc to exit
       } else if (key == 32){
         paused = !paused; //Press space to pause
+        if (paused){
+          mciSendString("pause audio", NULL, 0, NULL);
+          //mciSendString("stop audio", NULL, 0, NULL);
+        } else {
+          audioPos = static_cast<int>((index / fps) * 1000);
+          string seek = "seek audio to " + to_string(audioPos);
+          mciSendString(seek.c_str(), NULL, 100, NULL);
+          //mciSendString("play audio notify", NULL, 0, NULL);
+          mciSendString("resume audio", NULL, 0, NULL);
+        }
         cout << "Playback paused" << endl;
       } else if (paused && key == 'k'){
         //Step Forward
         const uint8_t *frameData = &RGBStream[index * frameSize];
         Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
         imshow("Video", frame);
+
+        //audioPos = static_cast<int>((index / fps) * 1000);
+        //string seek = "seek audio to " + to_string(audioPos) + " ms";
         index++;
       } else if (paused && key == 'j'){
         //Step Backwards
-        const uint8_t *frameData = &RGBStream[index * frameSize];
-        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
-        imshow("Video", frame);
         if (index != 0){
           index--;
         }
+        const uint8_t *frameData = &RGBStream[index * frameSize];
+        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
+        imshow("Video", frame);
+
+        //audioPos = static_cast<int>((index / fps) * 1000);
+        //string seek = "seek audio to " + to_string(audioPos) + " ms"
       } else if(key == 'p'){
         //Play
         index = 0;
@@ -229,8 +266,16 @@ int main(int argc, char **argv)
         const uint8_t *frameData = &RGBStream[index * frameSize];
         Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
         imshow("Video", frame);
+        mciSendString("stop audio", NULL, 0, NULL);
+        mciSendString("seek audio to start", NULL, 100, NULL);
+        //mciSendString("resume audio", NULL, 0, NULL);
+        mciSendString("play audio notify", NULL, 0, NULL);
       } else if (key == 's'){
         //Stop
+        //mciSendString("stop audio", NULL, 0, NULL);
+        //mciSendString("seek audio to start", NULL, 0, NULL);
+        mciSendString("play audio notify", NULL, 0, NULL);
+        mciSendString("pause audio", NULL, 0, NULL);
         index = 0;
         paused = true;
         const uint8_t *frameData = &RGBStream[index * frameSize];
@@ -251,8 +296,8 @@ int main(int argc, char **argv)
 
 
 /**Function to output 8x8 IDCT block --Colbert**/ 
-vector<vector<double>> outputIDCTBlock(vector<vector<double>> ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV) {
-    vector<vector<double>> block(8, vector<double>(8));
+void outputIDCTBlock(vector<vector<double>> &ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV, vector<vector<double>> &outBlock) {
+    //vector<vector<double>> block(8, vector<double>(8));
     // Do the equation
     double sum;
     double CU;
@@ -275,10 +320,9 @@ vector<vector<double>> outputIDCTBlock(vector<vector<double>> ogBlock, vector<ve
                     sum += CU * CV * ogBlock[v][u] * cosTableU[u][x] * cosTableV[v][y];
                 }
             }
-            block[y][x] = static_cast<double> (clamp((sum * 0.25), 0.0, 255.0));
+            outBlock[y][x] = static_cast<double> (clamp((sum * 0.25), 0.0, 255.0));
         }
     }
-    return block;
 }
 /**Cosine Table Function**/
 vector<vector<double>> outputCosineTableV(int sizeY, int sizeX){
@@ -324,10 +368,10 @@ void readDataThread(ifstream &inputFile, double n, double nn){
   double bufVal;
   int color = 0; //r = 0 g = 1 b = 2
   int type = -1;
+  vector<vector<double>> bufBlock(8, vector<double>(8));
+  vector<vector<double>> IDCTBlock(8, vector<double>(8));
   while(inputFile >> bufVal){
     //First value of each line is blocktype (foreground/background)
-    vector<vector<double>> bufBlock(8, vector<double>(8));
-    vector<vector<double>> IDCTBlock(8, vector<double>(8));
     type = static_cast<int> (bufVal);
     for (int i = 0; i < 8; i++){
       for (int j = 0; j < 8; j++){
@@ -346,7 +390,7 @@ void readDataThread(ifstream &inputFile, double n, double nn){
         bufBlock[i][j] = bufVal;
       }
     }
-    IDCTBlock = outputIDCTBlock(bufBlock, cosTableU, cosTableV);
+    outputIDCTBlock(bufBlock, cosTableU, cosTableV, IDCTBlock);
     if (color == 0){
       {
         unique_lock<mutex> lock(redMut);
