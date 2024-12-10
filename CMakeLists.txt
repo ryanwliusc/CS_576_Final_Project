@@ -18,13 +18,9 @@ add_executable(MyEncoder src/MyEncoder.cpp)
 # Decoder executable
 add_executable(MyDecoder src/MyDecoder.cpp)
 
-# test executable
-add_executable(openCVTest src/openCVTest.cpp)
-
 # Link libraries
 target_link_libraries(MyEncoder ${OpenCV_LIBS})
 target_link_libraries(MyDecoder ${OpenCV_LIBS})
-target_link_libraries(openCVTest ${OpenCV_LIBS})
 
 # X11 required on Linux
 if(UNIX AND NOT APPLE)
@@ -33,6 +29,5 @@ if(UNIX AND NOT APPLE)
         include_directories(${X11_INCLUDE_DIR})
         target_link_libraries(MyEncoder ${X11_LIBRARIES})
         target_link_libraries(MyDecoder ${X11_LIBRARIES})
-        target_link_libraries(openCVTest ${X11_LIBRARIES})
     endif()
 endif()
