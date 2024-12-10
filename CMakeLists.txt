@@ -18,7 +18,6 @@ add_executable(MyEncoder src/MyEncoder.cpp)
 # Decoder executable
 add_executable(MyDecoder src/MyDecoder.cpp)
 
-
 # Link libraries
 target_link_libraries(MyEncoder ${OpenCV_LIBS})
 target_link_libraries(MyDecoder ${OpenCV_LIBS})

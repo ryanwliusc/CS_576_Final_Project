@@ -21,6 +21,7 @@ namespace fs = std::filesystem;
 deque<vector<vector<double>>> redQ;
 deque<vector<vector<double>>> greenQ;
 deque<vector<vector<double>>> blueQ;
+
 mutex redMut, greenMut, blueMut;
 condition_variable cvRed, cvGreen, cvBlue;
 atomic<bool> dataExists(true);
@@ -35,9 +36,9 @@ vector<vector<double>> outputCosineTableU(int sizeY, int sizeX);
 vector<unsigned char> to1D(vector<vector<double>> &output2D);
 vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned char> green, vector<unsigned char> blue);
 void readDataThread(ifstream &inputFile, double n, double nn);
-void redThread(vector<vector<double>> &red, int width);
-void greenThread(vector<vector<double>> &green, int width);
-void blueThread(vector<vector<double>> &blue, int width);
+void redThread(vector<vector<int>> &red, int width);
+void greenThread(vector<vector<int>> &green, int width);
+void blueThread(vector<vector<int>> &blue, int width);
 
 int main(int argc, char **argv)
 {
@@ -329,6 +330,7 @@ void readDataThread(ifstream &inputFile, double n, double nn){
     vector<vector<double>> bufBlock(8, vector<double>(8));
     vector<vector<double>> IDCTBlock(8, vector<double>(8));
     type = static_cast<int> (bufVal);
+
     for (int i = 0; i < 8; i++){
       for (int j = 0; j < 8; j++){
         //Parse line (64 more values), Dequantize then add to block
@@ -380,7 +382,7 @@ void readDataThread(ifstream &inputFile, double n, double nn){
   cvGreen.notify_one();
   cvBlue.notify_one();
 }
-void redThread(vector<vector<double>> &red, int width){
+void redThread(vector<vector<int>> &red, int width){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
@@ -419,7 +421,7 @@ void redThread(vector<vector<double>> &red, int width){
     test++;
   }
 }
-void greenThread(vector<vector<double>> &green, int width){
+void greenThread(vector<vector<int>> &green, int width){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
@@ -458,7 +460,7 @@ void greenThread(vector<vector<double>> &green, int width){
     test++;
   }
 }
-void blueThread(vector<vector<double>> &blue, int width){
+void blueThread(vector<vector<int>> &blue, int width){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
