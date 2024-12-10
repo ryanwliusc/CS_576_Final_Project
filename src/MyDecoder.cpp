@@ -155,6 +155,8 @@ int main(int argc, char **argv)
   //openCV testing
   //OpenCV is in BGR format
   int frameSize = width * height * 3;
+  // Calculate total number of frames
+  int totalFrames = RGBStream.size() / frameSize;
   // Check if the input data size is valid
   int added = 0;
   if (RGBStream.size() % frameSize != 0) {
@@ -171,48 +173,79 @@ int main(int argc, char **argv)
   }
   //cout << "added: " << added << " more values to fill out 960x540" << endl;
   cout << "removed: " << added << " values to get to 960x536" << endl;
-  // Calculate total number of frames
-  int totalFrames = RGBStream.size() / frameSize;
   
   int index = 0;
+  bool paused = false;
   namedWindow("Video", WINDOW_NORMAL);
   resizeWindow("Video", width, height);
+  /* To fix fps:
+   Found on https://github.com/stephanecharette/MoveDetect/blob/master/src-test/main.cpp#L127-L139
+   */
+  int fps = 30;
+  const size_t frame_length_ns	= std::round(1000000000.0 / fps);
+  const std::chrono::high_resolution_clock::duration		duration				= std::chrono::nanoseconds(frame_length_ns);
+  const std::chrono::high_resolution_clock::time_point	start_time				= std::chrono::high_resolution_clock::now();
+  std::chrono::high_resolution_clock::time_point			next_frame_time_point	= start_time + duration;
+
+  //PlayBack Loop
   while (true){
+    const std::chrono::high_resolution_clock::time_point now =std::chrono::high_resolution_clock::now();
+    const int milliseconds_to_wait =std::chrono::duration_cast<std::chrono::milliseconds>(next_frame_time_point - now).count();
     const uint8_t* frameData = &RGBStream[index * frameSize];
     Mat frame(height, width, CV_8UC3, const_cast<uint8_t*>(frameData));
-    //Mat frameBGR;
-    //cvtColor(frame, frameBGR, COLOR_RGB2BGR);
-    imshow("Video", frame);
-    if (waitKey(1000 / 30) == 27){
-      //1000ms/ 30fps
-      break; //Press esc to close video
-    } 
-    if (index < totalFrames){
-      index++;
-    } else {
-      index=0;
+    if (!paused) {
+      imshow("Video", frame);
+      if (index < totalFrames) {
+        index++;
+      } else {
+        index = 0;
+      }
     }
- }
+    if (milliseconds_to_wait > 0) {
+      int key = waitKey(milliseconds_to_wait);
+      if (key == 27) {
+        break;  // Press esc to exit
+      } else if (key == 32){
+        paused = !paused; //Press space to pause
+        cout << "Playback paused" << endl;
+      } else if (paused && key == 'k'){
+        //Step Forward
+        const uint8_t *frameData = &RGBStream[index * frameSize];
+        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
+        imshow("Video", frame);
+        index++;
+      } else if (paused && key == 'j'){
+        //Step Backwards
+        const uint8_t *frameData = &RGBStream[index * frameSize];
+        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
+        imshow("Video", frame);
+        if (index != 0){
+          index--;
+        }
+      } else if(key == 'p'){
+        //Play
+        index = 0;
+        paused = false;
+        const uint8_t *frameData = &RGBStream[index * frameSize];
+        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
+        imshow("Video", frame);
+      } else if (key == 's'){
+        //Stop
+        index = 0;
+        paused = true;
+        const uint8_t *frameData = &RGBStream[index * frameSize];
+        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
+        imshow("Video", frame);
+      }
+      next_frame_time_point += duration;
+      if (now > next_frame_time_point) {
+        next_frame_time_point = now + duration; // we've fallen too far behind, reset the time we need to show the next frame
+      } 
+    }
+  }
   destroyAllWindows();
-    //inputFile.read(reinterpret_cast<char*>(frame.data), width * height * 3);
-    //frame = imdecode(RGBStream, IMREAD_COLOR);
-    //memcpy(frame.data, RGBStream.data(), width * height * 3);
-    //cvtColor(frame, frameBGR, COLOR_RGB2BGR);
-
-
-  //#TODO (I think this is how to do it?)
-  //Fill in RGB pixel data for each individual frame
-  //Probably can process frames with openCV
-  //openCV frames --> SDL maybe
-  //Frame size --> 960 x 540 (Could be variable? Probably dont need to account for other resolutions)
-
   //#TODO Create video player using OpenCV that plays frames with audio
   //30 FPS, audio: 44.1 KHz
-  //Stop Function
-  //Pause Function
-  //Play Function
-  //Step Function (Step frame-by-frame)
-
   return 0;
 }
 
