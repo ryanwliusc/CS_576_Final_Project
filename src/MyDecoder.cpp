@@ -36,9 +36,9 @@ vector<vector<double>> outputCosineTableU(int sizeY, int sizeX);
 vector<unsigned char> to1D(vector<vector<double>> &output2D);
 vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned char> green, vector<unsigned char> blue);
 void readDataThread(ifstream &inputFile, double n, double nn);
-void redThread(vector<vector<int>> &red, int width);
-void greenThread(vector<vector<int>> &green, int width);
-void blueThread(vector<vector<int>> &blue, int width);
+void redThread(vector<vector<double>> &red, int width);
+void greenThread(vector<vector<double>> &green, int width);
+void blueThread(vector<vector<double>> &blue, int width);
 
 int main(int argc, char **argv)
 {
