@@ -25,7 +25,21 @@ using namespace cv;
 using namespace std;
 namespace fs = std::filesystem;
 
-/** Declarations*/
+/** Declarations*/ 
+// Global control flags for audio
+ma_bool32 g_IsPaused = MA_FALSE;
+ma_bool32 g_Restart = MA_FALSE;
+ma_bool32 g_Stop = MA_FALSE; // Added for stopping audio playback
+
+struct ControlState {
+    bool *paused;
+    int *index;
+    int totalFrames;
+    int width;
+    ma_decoder *decoder;
+    int fps;
+};
+
 //Multithread section
 deque<vector<vector<double>>> redQ;
 deque<vector<vector<double>>> greenQ;
@@ -49,6 +63,9 @@ void greenThread(vector<vector<double>> &green, int width);
 void blueThread(vector<vector<double>> &blue, int width);
 
 void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount);
+void createButtons(Mat &playerPanel, int width);
+bool isButtonClicked(Point click, Rect button);
+void onMouse(int event, int x, int y, int flags, void *userdata);
 
 int main(int argc, char **argv)
 {
@@ -71,23 +88,7 @@ int main(int argc, char **argv)
     cerr << "Error Opening File for Reading" << endl;
     exit(1);
   }
-/*
-  //openCV testing
-  //OpenCV is in BGR format
-  Mat frame(height,width, CV_8UC3);
-  Mat frameBGR;
-  while(true) {
-    inputFile.read(reinterpret_cast<char*>(frame.data), width * height * 3);
-    cvtColor(frame, frameBGR, COLOR_RGB2BGR);
-     if (inputFile.eof()) {
-          break;
-      }
-      imshow("Video", frameBGR);
-      if (waitKey(1000 / 30) == 27){
-        break; //Press esc to close video
-      }
-  }
-  */
+
   //Create Cosine Table (Having a cosine table might be faster, might not be, not sure) (What I did for assignment 3 -Colbert)
   cosTableU = outputCosineTableU(8,8);
   cosTableV = outputCosineTableV(8,8);
@@ -97,9 +98,7 @@ int main(int argc, char **argv)
   int n1;
   int n2;
   inputFile >> n1 >> n2; //Parsed n1 and n2
-  //cout << "n1: "<< n1 << " n2: " << n2 << endl;
 
-  //4 is there for overflow --> 544 % 8 = 0;
   vector<vector<double>> redStream2D;
   vector<vector<double>> greenStream2D;
   vector<vector<double>> blueStream2D;
@@ -128,24 +127,7 @@ int main(int argc, char **argv)
   bThread.join();
 
   cout << "Parse done" << endl;
-  //cout << "IDCT Done" << endl;
   inputFile.close();
-  /*
-  for(int i = 0; i < redStream2D.size(); i++){
-    for (int j = 0; j < redStream2D[0].size(); j++){
-       cout << "redStream2D["<<i<<"]["<<j<<"]: " << redStream2D[i][j] << endl;
-    }
-  }
-  for(int i = 0; i < greenStream2D.size(); i++){
-    for (int j = 0; j < greenStream2D[i].size(); j++){
-       cout << "greenStream2D["<<i<<"]["<<j<<"]: " << greenStream2D[i][j] << endl;
-    }
-  }
-  for(int i = 0; i < blueStream2D.size(); i++){
-    for (int j = 0; j < blueStream2D[i].size(); j++){
-       cout << "blueStream2D["<<i<<"]["<<j<<"]: " << blueStream2D[i][j] << endl;
-    }
-  }*/
   vector<unsigned char> redStream;
   vector<unsigned char> greenStream;
   vector<unsigned char> blueStream;
@@ -155,18 +137,12 @@ int main(int argc, char **argv)
   cout<<"to 1D done" << endl;
   
   vector<unsigned char> RGBStream = transferInData(redStream, greenStream, blueStream);
-  //testing RGBStream
-  /*
-  for (int i = 0; i < RGBStream.size(); i++){
-   cout << RGBStream[i] << endl;
-  }*/
-  cout << "No crash poggers" << endl;
   cout << "RGBStream size = " << RGBStream.size() << endl;
   
   //OpenCV is in BGR format
-  int frameSize = width * height * 3;
+  const size_t frameSize = width * height * 3;
   // Calculate total number of frames
-  int totalFrames = RGBStream.size() / frameSize;
+  const int totalFrames = RGBStream.size() / frameSize;
   // Check if the input data size is valid
   int added = 0;
   if (RGBStream.size() % frameSize != 0) {
@@ -203,100 +179,109 @@ int main(int argc, char **argv)
   deviceConfig.dataCallback      = data_callback;   // This function will be called when miniaudio needs more data.
   deviceConfig.pUserData         = &decoder;        // Can be accessed from the device object (device.pUserData).
 
+  ma_data_source_set_looping(&decoder, MA_TRUE);
+
   if (ma_device_init(NULL, &deviceConfig, &device) != MA_SUCCESS) {
-    cout << "Failed to open playback device.\n";
+    cout << "Failed to open audio device.\n";
     ma_decoder_uninit(&decoder);
     //return -3;
   }
   //Start Audio
   if (ma_device_start(&device) != MA_SUCCESS) {
-    cout << "Failed to start playback device.\n";
+    cout << "Failed to start audio device.\n";
     ma_device_uninit(&device);
     ma_decoder_uninit(&decoder);
     //return -4;
   }
+
+  //OpenCV Setup
+  namedWindow("Player", WINDOW_NORMAL);
+  resizeWindow("Player", width, height + 80);
+  setWindowProperty("Player", WND_PROP_TOPMOST, 1);
+
+  Mat playerPanel(height + 80, width, CV_8UC3, Scalar(0, 0, 0));
+
   int index = 0;
   bool paused = false;
-  namedWindow("Video", WINDOW_NORMAL);
-  resizeWindow("Video", width, height);
-  setWindowProperty("Video", WND_PROP_TOPMOST, 1);
-  /* To fix fps:
-   Found on https://github.com/stephanecharette/MoveDetect/blob/master/src-test/main.cpp#L127-L139
-   */
   int fps = 30;
-  const size_t frame_length_ns	= std::round(1000000000.0 / fps);
-  const std::chrono::high_resolution_clock::duration		duration				= std::chrono::nanoseconds(frame_length_ns);
-  const std::chrono::high_resolution_clock::time_point	start_time				= std::chrono::high_resolution_clock::now();
-  std::chrono::high_resolution_clock::time_point			next_frame_time_point	= start_time + duration;
+
+  const auto frameDuration = chrono::nanoseconds(static_cast<int>(1e9 / fps));
+  auto nextFrameTime = chrono::high_resolution_clock::now() + frameDuration;
+
+  ControlState state = {&paused, &index, totalFrames, width, &decoder, fps};
+  setMouseCallback("Player", onMouse, &state);
+  auto *stateP = static_cast<ControlState *>(&state);
 
   //PlayBack Loop
   while (true){
-    const std::chrono::high_resolution_clock::time_point now =std::chrono::high_resolution_clock::now();
-    const int milliseconds_to_wait =std::chrono::duration_cast<std::chrono::milliseconds>(next_frame_time_point - now).count();
-    const uint8_t* frameData = &RGBStream[index * frameSize];
-    Mat frame(height, width, CV_8UC3, const_cast<uint8_t*>(frameData));
-    
-    int audioPos = static_cast<int>((index / fps) * 1000);
+    Mat frame(height, width, CV_8UC3);
     if (!paused) {
-      //Video
-      imshow("Video", frame);
+      const uint8_t* frameData = &RGBStream[index * frameSize];
+      Mat frame(height, width, CV_8UC3, const_cast<uint8_t*>(frameData));
+      if (frame.empty()) {
+        cerr << "Error: Frame data is invalid." << endl;
+        break;
+      }
+
+      frame.copyTo(playerPanel(Rect(0, 0, width, height)));
 
       if (index < totalFrames) {
         index++;
       } else {
-        index = 0;
+        //When video finishes, go back to start
+        *(stateP->index) = 0;
+        *(stateP->paused) = true;
+        g_Restart = MA_TRUE;
+        g_IsPaused = *(stateP->paused);
       }
+    } else if (paused){
+      const uint8_t* frameData = &RGBStream[index * frameSize];
+      Mat frame(height, width, CV_8UC3, const_cast<uint8_t*>(frameData));
+      frame.copyTo(playerPanel(Rect(0, 0, width, height)));
     }
-    if (milliseconds_to_wait > 0) {
-      int key = waitKey(milliseconds_to_wait);
-      if (key == 27) {
-        ma_decoder_uninit(&decoder);
-        ma_device_uninit(&device);
-        break;  // Press esc to exit
-      } else if (key == 32){
-        paused = !paused; //Press space to pause
-        if (paused){
-        } else {
-        }
-        cout << "Playback paused" << endl;
-      } else if (paused && key == 'k'){
-        //Step Forward
-        index++;
-        const uint8_t *frameData = &RGBStream[index * frameSize];
-        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
-        imshow("Video", frame);
-      } else if (paused && key == 'j'){
-        //Step Backwards
-        if (index != 0){
-          index--;
-        }
-        const uint8_t *frameData = &RGBStream[index * frameSize];
-        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
-        imshow("Video", frame);
-      } else if(key == 'p'){
-        //Play
-        index = 0;
-        paused = false;
-        const uint8_t *frameData = &RGBStream[index * frameSize];
-        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
-        imshow("Video", frame);
-      } else if (key == 's'){
-        //Stop
-        index = 0;
-        paused = true;
-        const uint8_t *frameData = &RGBStream[index * frameSize];
-        Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
-        imshow("Video", frame);
-      }
-      next_frame_time_point += duration;
-      if (now > next_frame_time_point) {
-        next_frame_time_point = now + duration; // we've fallen too far behind, reset the time we need to show the next frame
-      } 
+    createButtons(playerPanel, width);
+    imshow("Player", playerPanel);
+      
+    int key = waitKey(1);
+    if (key == 27) {
+      ma_decoder_uninit(&decoder);
+      ma_device_uninit(&device);
+      break;  // Press esc to exit
+    } else if (key == 32){
+      *(stateP->paused) = !*(stateP->paused);
+      g_IsPaused = *(stateP->paused);
+      cout << "Playback paused" << endl;
+    } else if (paused && key == 'k'){
+      //Step Forward
+      *(stateP->index) = min(*(stateP->index) + 1, stateP->totalFrames - 1);
+      ma_decoder_seek_to_pcm_frame(stateP->decoder, *(stateP->index) * stateP->decoder->outputSampleRate / stateP->fps);
+    } else if (paused && key == 'j'){
+      //Step Backwards
+      *(stateP->index) = max(*(stateP->index) - 1, 0);
+      ma_decoder_seek_to_pcm_frame(stateP->decoder, *(stateP->index) * stateP->decoder->outputSampleRate / stateP->fps);
+    } else if(key == 'p'){
+      //Play
+      g_Restart = MA_TRUE;
+      *(stateP->paused) = false;
+      g_IsPaused = *(stateP->paused);
+      *(stateP->index) = 0;
+    } else if (key == 's'){
+      //Stop
+      *(stateP->index) = 0;
+      *(stateP->paused) = true;
+      g_Restart = MA_TRUE;
+      g_IsPaused = *(stateP->paused);
     }
+    if (chrono::high_resolution_clock::now() < nextFrameTime) {
+      this_thread::sleep_until(nextFrameTime);
+    }
+    nextFrameTime += frameDuration;
   }
+
+  //Clean up Audio and Video
+  ma_device_uninit(&device);
+  ma_decoder_uninit(&decoder);
   destroyAllWindows();
-  //#TODO Create video player using OpenCV that plays frames with audio
-  //30 FPS, audio: 44.1 KHz
   return 0;
 }
 
@@ -547,14 +532,63 @@ void blueThread(vector<vector<double>> &blue, int width){
     test++;
   }
 }
-void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount)
-{
-    ma_decoder* pDecoder = (ma_decoder*)pDevice->pUserData;
-    if (pDecoder == NULL) {
-        return;
+void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount) {
+    ma_decoder *pDecoder = (ma_decoder *)pDevice->pUserData;
+    if (pDecoder == nullptr || g_Stop) return;
+
+    if (g_Restart) {
+        ma_decoder_seek_to_pcm_frame(pDecoder, 0);
+        g_Restart = MA_FALSE;
     }
 
-    ma_decoder_read_pcm_frames(pDecoder, pOutput, frameCount, NULL);
+    if (!g_IsPaused) {
+        ma_data_source_read_pcm_frames(pDecoder, pOutput, frameCount, nullptr);
+    }
 
     (void)pInput;
+}
+void createButtons(Mat &playerPanel, int width) {
+    int centerX = width / 2;
+    rectangle(playerPanel, Rect(centerX - 170, 560, 120, 30), Scalar(150, 150, 150), FILLED);
+    putText(playerPanel, "Play/Pause", Point(centerX - 155, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
+
+    rectangle(playerPanel, Rect(width - 150, 560, 120, 30), Scalar(150, 150, 150), FILLED);
+    putText(playerPanel, "Step Forward", Point(width - 140, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
+
+    rectangle(playerPanel, Rect(50, 560, 120, 30), Scalar(150, 150, 150), FILLED);
+    putText(playerPanel, "Step Back", Point(70, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
+
+    rectangle(playerPanel, Rect(centerX + 50, 560, 120, 30), Scalar(150, 150, 150), FILLED);
+    putText(playerPanel, "Stop", Point(centerX + 95, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
+}
+bool isButtonClicked(Point click, Rect button) {
+    return button.contains(click);
+}
+void onMouse(int event, int x, int y, int flags, void *userdata) {
+    if (event != EVENT_LBUTTONDOWN) return;
+
+    auto *state = static_cast<ControlState *>(userdata);
+    Point click(x, y);
+
+    int centerX = state->width / 2;
+    Rect playPauseButton(centerX - 170, 560, 120, 30);
+    Rect stepForwardButton(state->width - 150, 560, 120, 30);
+    Rect stepBackButton(50, 560, 120, 30);
+    Rect stopButton(centerX + 50, 560, 120, 30);
+
+    if (isButtonClicked(click, playPauseButton)) {
+        *(state->paused) = !*(state->paused);
+        g_IsPaused = *(state->paused);
+    } else if (isButtonClicked(click, stepForwardButton) && *(state->paused)) {
+        *(state->index) = min(*(state->index) + 1, state->totalFrames - 1);
+        ma_decoder_seek_to_pcm_frame(state->decoder, *(state->index) * state->decoder->outputSampleRate / state->fps);
+    } else if (isButtonClicked(click, stepBackButton) && *(state->paused)) {
+        *(state->index) = max(*(state->index) - 1, 0);
+        ma_decoder_seek_to_pcm_frame(state->decoder, *(state->index) * state->decoder->outputSampleRate / state->fps);
+    } else if (isButtonClicked(click, stopButton)){
+        *(state->index) = 0;
+        *(state->paused) = true;
+        g_Restart = MA_TRUE;
+        g_IsPaused = *(state->paused);
+    }
 }
