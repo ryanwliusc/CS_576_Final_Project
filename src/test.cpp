@@ -24,11 +24,6 @@ ma_bool32 g_IsPaused = MA_FALSE;
 ma_bool32 g_Restart = MA_FALSE;
 ma_bool32 g_Stop = MA_FALSE; // Added for stopping audio playback
 
-// Audio position helper
-int getAudioPos(int index, int fps) {
-    return static_cast<int>((index / fps) * 1000);
-}
-
 // Miniaudio callback for audio playback
 void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount) {
     ma_decoder *pDecoder = (ma_decoder *)pDevice->pUserData;
@@ -48,14 +43,17 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
 
 void createButtons(Mat &playerPanel, int width) {
     int centerX = width / 2;
-    rectangle(playerPanel, Rect(centerX - 50, 560, 100, 30), Scalar(150, 150, 150), FILLED);
-    putText(playerPanel, "Play/Pause", Point(centerX - 45, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
+    rectangle(playerPanel, Rect(centerX - 170, 560, 120, 30), Scalar(150, 150, 150), FILLED);
+    putText(playerPanel, "Play/Pause", Point(centerX - 155, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
 
-    rectangle(playerPanel, Rect(width - 150, 560, 100, 30), Scalar(150, 150, 150), FILLED);
-    putText(playerPanel, "Step Forward", Point(width - 145, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
+    rectangle(playerPanel, Rect(width - 150, 560, 120, 30), Scalar(150, 150, 150), FILLED);
+    putText(playerPanel, "Step Forward", Point(width - 140, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
 
-    rectangle(playerPanel, Rect(50, 560, 100, 30), Scalar(150, 150, 150), FILLED);
-    putText(playerPanel, "Step Back", Point(55, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
+    rectangle(playerPanel, Rect(50, 560, 120, 30), Scalar(150, 150, 150), FILLED);
+    putText(playerPanel, "Step Back", Point(70, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
+
+    rectangle(playerPanel, Rect(centerX + 50, 560, 120, 30), Scalar(150, 150, 150), FILLED);
+    putText(playerPanel, "Stop", Point(centerX + 95, 580), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
 }
 
 bool isButtonClicked(Point click, Rect button) {
@@ -78,9 +76,10 @@ void onMouse(int event, int x, int y, int flags, void *userdata) {
     Point click(x, y);
 
     int centerX = state->width / 2;
-    Rect playPauseButton(centerX - 50, 560, 100, 30);
-    Rect stepForwardButton(state->width - 150, 560, 100, 30);
-    Rect stepBackButton(50, 560, 100, 30);
+    Rect playPauseButton(centerX - 170, 560, 120, 30);
+    Rect stopButton(centerX + 50, 560, 120, 30);
+    Rect stepForwardButton(state->width - 150, 560, 120, 30);
+    Rect stepBackButton(50, 560, 120, 30);
 
     if (isButtonClicked(click, playPauseButton)) {
         *(state->paused) = !*(state->paused);
@@ -91,12 +90,17 @@ void onMouse(int event, int x, int y, int flags, void *userdata) {
     } else if (isButtonClicked(click, stepBackButton) && *(state->paused)) {
         *(state->index) = max(*(state->index) - 1, 0);
         ma_decoder_seek_to_pcm_frame(state->decoder, *(state->index) * state->decoder->outputSampleRate / state->fps);
+    } else if (isButtonClicked(click, stopButton)){
+        *(state->index) = 0;
+        *(state->paused) = true;
+        g_Restart = MA_TRUE;
+        g_IsPaused = *(state->paused);
     }
 }
 
 int main(int argc, char **argv) {
-    string videoPath = "E:/576_final_project_test_files/SAL.rgb";
-    string audioPath = "E:/576_final_project_test_files/SAL.wav";
+    string videoPath = "../../../video/rgbs/WalkingStaticBackground.rgb";
+    string audioPath = "../../../video/wavs/WalkingStaticBackground.wav";
 
     // Video dimensions
     const int width = 960;
@@ -174,11 +178,12 @@ int main(int argc, char **argv) {
 
     ControlState state = {&paused, &index, totalFrames, width, &decoder, fps};
     setMouseCallback("Player", onMouse, &state);
+    auto *stateP = static_cast<ControlState *>(&state);
 
     while (true) {
         Mat videoFrame(height, width, CV_8UC3);
 
-        if (!paused && index < totalFrames) {
+        if (!paused) {
             const uint8_t *frameData = &RGBStream[index * frameSize];
             Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
             if (frame.empty()) {
@@ -189,19 +194,26 @@ int main(int argc, char **argv) {
             // Convert RGB to BGR for OpenCV
             cvtColor(frame, videoFrame, COLOR_RGB2BGR);
             videoFrame.copyTo(playerPanel(Rect(0, 0, width, height)));
-            index++;
+            if (index < totalFrames) {
+        index++;
+      } else {
+        *(stateP->index) = 0;
+        *(stateP->paused) = true;
+        g_Restart = MA_TRUE;
+        g_IsPaused = *(stateP->paused); // Stop audio when video finishes
+      }
         } else if (paused) {
             const uint8_t *frameData = &RGBStream[index * frameSize];
             Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
             cvtColor(frame, videoFrame, COLOR_RGB2BGR);
             videoFrame.copyTo(playerPanel(Rect(0, 0, width, height)));
         }
-
+/*
         if (index >= totalFrames) {
             g_Stop = MA_TRUE; // Stop audio when video finishes
             break;
         }
-
+*/
         createButtons(playerPanel, width);
         imshow("Player", playerPanel);
 
