@@ -68,6 +68,8 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
         exit(1);
     }
 
+    int frame_count = 0;
+
     // create precalculated tables
     vector<vector<float>> tableu = outputCosineTableU();
     vector<vector<float>> tablev = outputCosineTableV();
@@ -82,6 +84,7 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
     // Loop and read 1 frame at a time until eof
     while (!inputFile.eof())
     {
+        frame_count++;
         // Read frame data directly in RGB interleaved format
         inputFile.read(reinterpret_cast<char *>(rgbBuffer.data()), width * height * 3);
 
@@ -101,6 +104,7 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
             // For simplicity, we'll just write a placeholder
             vector<vector<bool>> holder;
             dctEncode(width, height, currFrame, outputFile, holder, n1, n2, tableu, tablev);
+            cout << "Iframe Done" << endl;
             firstFrame = false;
         }
         else
@@ -121,12 +125,16 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
 
             // Encode the frame
             dctEncode(width, height, currFrame, outputFile, isForeground, n1, n2, tableu, tablev);
+
+            if (frame_count % 30 == 0)
+            {
+                cout << "\rFrame " << frame_count << " done";
+            }
         }
 
         // Update prevFrame
         prevFrame = currFrame;
     }
-
     inputFile.close();
     outputFile.close();
 }
@@ -409,7 +417,7 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
                     r = (r * c) / n;
                     g = (g * c) / n;
                     b = (b * c) / n;
-                    //if (bound == 8)
+                    // if (bound == 8)
                     //{
                     rblocks[blockIndex][u][v] = round(r);
                     gblocks[blockIndex][u][v] = round(g);
