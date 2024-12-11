@@ -11,11 +11,15 @@
 #include <chrono>
 #include <atomic>
 #include <condition_variable>
+#include <stdio.h>
 //Audio only works on Windows
 #include <windows.h>
 #include <Mmsystem.h>
 #include <mciapi.h>
 #pragma comment(lib, "winmm.lib")
+//Audio with miniaudio.h (instead) https://miniaud.io/
+#define MINIAUDIO_IMPLEMENTATION
+#include "miniaudio.h"
 
 using namespace cv;
 using namespace std;
@@ -43,6 +47,8 @@ void readDataThread(ifstream &inputFile, double n, double nn);
 void redThread(vector<vector<double>> &red, int width);
 void greenThread(vector<vector<double>> &green, int width);
 void blueThread(vector<vector<double>> &blue, int width);
+
+void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount);
 
 int main(int argc, char **argv)
 {
@@ -157,7 +163,6 @@ int main(int argc, char **argv)
   cout << "No crash poggers" << endl;
   cout << "RGBStream size = " << RGBStream.size() << endl;
   
-  //openCV testing
   //OpenCV is in BGR format
   int frameSize = width * height * 3;
   // Calculate total number of frames
@@ -179,13 +184,37 @@ int main(int argc, char **argv)
   //cout << "added: " << added << " more values to fill out 960x540" << endl;
   cout << "removed: " << added << " values to get to 960x536" << endl;
 
-  /*Audio Stuff https://stackoverflow.com/questions/22253074/how-to-play-or-open-mp3-or-wav-sound-file-in-c-program*/
-  string audioAlias = "open " + audioPath + " type waveaudio alias audio";
-  MCIERROR audioCheck = mciSendString(audioAlias.c_str(), NULL, 0, NULL);
-  if (audioCheck != 0){
-    cerr << "Error opening audio file" << endl;
+  /*Audio Stuff*/
+  ma_result result;
+  ma_decoder decoder;
+  ma_device_config deviceConfig;
+  ma_device device;
+
+  result = ma_decoder_init_file(audioPath.c_str(), NULL, &decoder);
+  if (result != MA_SUCCESS) {
+        cout << "Could not load file" << endl;
+        //return -1;
   }
 
+  deviceConfig = ma_device_config_init(ma_device_type_playback);
+  deviceConfig.playback.format   = decoder.outputFormat;      // Set to ma_format_unknown to use the device's native format.
+  deviceConfig.playback.channels = decoder.outputChannels;    // Set to 0 to use the device's native channel count.
+  deviceConfig.sampleRate        = decoder.outputSampleRate;  // Set to 0 to use the device's native sample rate.
+  deviceConfig.dataCallback      = data_callback;   // This function will be called when miniaudio needs more data.
+  deviceConfig.pUserData         = &decoder;        // Can be accessed from the device object (device.pUserData).
+
+  if (ma_device_init(NULL, &deviceConfig, &device) != MA_SUCCESS) {
+    cout << "Failed to open playback device.\n";
+    ma_decoder_uninit(&decoder);
+    //return -3;
+  }
+  //Start Audio
+  if (ma_device_start(&device) != MA_SUCCESS) {
+    cout << "Failed to start playback device.\n";
+    ma_device_uninit(&device);
+    ma_decoder_uninit(&decoder);
+    //return -4;
+  }
   int index = 0;
   bool paused = false;
   namedWindow("Video", WINDOW_NORMAL);
@@ -201,8 +230,6 @@ int main(int argc, char **argv)
   std::chrono::high_resolution_clock::time_point			next_frame_time_point	= start_time + duration;
 
   //PlayBack Loop
-  TCHAR tch[100];
-  mciSendString("play audio notify", NULL, 0, NULL);
   while (true){
     const std::chrono::high_resolution_clock::time_point now =std::chrono::high_resolution_clock::now();
     const int milliseconds_to_wait =std::chrono::duration_cast<std::chrono::milliseconds>(next_frame_time_point - now).count();
@@ -223,31 +250,21 @@ int main(int argc, char **argv)
     if (milliseconds_to_wait > 0) {
       int key = waitKey(milliseconds_to_wait);
       if (key == 27) {
-        mciSendString("stop audio", NULL, 0, NULL);
-        mciSendString("close audio", NULL, 0, NULL);
+        ma_decoder_uninit(&decoder);
+        ma_device_uninit(&device);
         break;  // Press esc to exit
       } else if (key == 32){
         paused = !paused; //Press space to pause
         if (paused){
-          mciSendString("pause audio", NULL, 0, NULL);
-          //mciSendString("stop audio", NULL, 0, NULL);
         } else {
-          audioPos = static_cast<int>((index / fps) * 1000);
-          string seek = "seek audio to " + to_string(audioPos);
-          mciSendString(seek.c_str(), NULL, 100, NULL);
-          //mciSendString("play audio notify", NULL, 0, NULL);
-          mciSendString("resume audio", NULL, 0, NULL);
         }
         cout << "Playback paused" << endl;
       } else if (paused && key == 'k'){
         //Step Forward
+        index++;
         const uint8_t *frameData = &RGBStream[index * frameSize];
         Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
         imshow("Video", frame);
-
-        //audioPos = static_cast<int>((index / fps) * 1000);
-        //string seek = "seek audio to " + to_string(audioPos) + " ms";
-        index++;
       } else if (paused && key == 'j'){
         //Step Backwards
         if (index != 0){
@@ -256,9 +273,6 @@ int main(int argc, char **argv)
         const uint8_t *frameData = &RGBStream[index * frameSize];
         Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
         imshow("Video", frame);
-
-        //audioPos = static_cast<int>((index / fps) * 1000);
-        //string seek = "seek audio to " + to_string(audioPos) + " ms"
       } else if(key == 'p'){
         //Play
         index = 0;
@@ -266,16 +280,8 @@ int main(int argc, char **argv)
         const uint8_t *frameData = &RGBStream[index * frameSize];
         Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
         imshow("Video", frame);
-        mciSendString("stop audio", NULL, 0, NULL);
-        mciSendString("seek audio to start", NULL, 100, NULL);
-        //mciSendString("resume audio", NULL, 0, NULL);
-        mciSendString("play audio notify", NULL, 0, NULL);
       } else if (key == 's'){
         //Stop
-        //mciSendString("stop audio", NULL, 0, NULL);
-        //mciSendString("seek audio to start", NULL, 0, NULL);
-        mciSendString("play audio notify", NULL, 0, NULL);
-        mciSendString("pause audio", NULL, 0, NULL);
         index = 0;
         paused = true;
         const uint8_t *frameData = &RGBStream[index * frameSize];
@@ -540,4 +546,15 @@ void blueThread(vector<vector<double>> &blue, int width){
     }
     test++;
   }
+}
+void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount)
+{
+    ma_decoder* pDecoder = (ma_decoder*)pDevice->pUserData;
+    if (pDecoder == NULL) {
+        return;
+    }
+
+    ma_decoder_read_pcm_frames(pDecoder, pOutput, frameCount, NULL);
+
+    (void)pInput;
 }
