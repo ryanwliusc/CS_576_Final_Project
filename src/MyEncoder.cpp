@@ -70,6 +70,9 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
 
     int frame_count = 0;
 
+    int N1 = pow(2, n1);
+    int N2 = pow(2, n2);
+
     // create precalculated tables
     vector<vector<float>> tableu = outputCosineTableU();
     vector<vector<float>> tablev = outputCosineTableV();
@@ -103,7 +106,7 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
             // Here, you might want to process the first frame differently
             // For simplicity, we'll just write a placeholder
             vector<vector<bool>> holder;
-            dctEncode(width, height, currFrame, outputFile, holder, n1, n2, tableu, tablev);
+            dctEncode(width, height, currFrame, outputFile, holder, N1, N2, tableu, tablev);
             cout << "Iframe Done" << endl;
             firstFrame = false;
         }
@@ -124,7 +127,7 @@ void readVideoData(string videoPath, int width, int height, ofstream &outputFile
             segmentForegroundBackground(motionVectors, widthBlocks, heightBlocks, isForeground);
 
             // Encode the frame
-            dctEncode(width, height, currFrame, outputFile, isForeground, n1, n2, tableu, tablev);
+            dctEncode(width, height, currFrame, outputFile, isForeground, N1, N2, tableu, tablev);
 
             if (frame_count % 30 == 0)
             {
@@ -330,11 +333,6 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
     vector<vector<vector<int>>> rblocks(8040, vector<vector<int>>(8, vector<int>(8, 0)));
     vector<vector<vector<int>>> gblocks(8040, vector<vector<int>>(8, vector<int>(8, 0)));
     vector<vector<vector<int>>> bblocks(8040, vector<vector<int>>(8, vector<int>(8, 0)));
-    /*
-    vector<vector<vector<int>>> rlblocks(120, vector<vector<int>>(4, vector<int>(8, 0)));
-    vector<vector<vector<int>>> glblocks(120, vector<vector<int>>(4, vector<int>(8, 0)));
-    vector<vector<vector<int>>> blblocks(120, vector<vector<int>>(4, vector<int>(8, 0)));
-    */
     bool iFrame = false;
     if (isForeground.empty())
     {
@@ -349,29 +347,22 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
             blockIndex++;
             // Mapping to top Left pixel of 8x8 block
             int mapping = (i * width + j) * 3;
-            //  handle last 4 pixels case
-            int bound = 8;
-            /*
-            if (i >= 536)
-            {
-                bound = 4;
-            } */
             // Determine whether the block is a foreground or background
             int row = i / 16;
             int col = j / 16;
-            int n = pow(2, n1);
+            int n = n1;
             int blocktype = 0;
             if (!iFrame)
             {
                 // last 8 pixels
                 if (row > 32)
                 {
-                    n = pow(2, n2);
+                    n = n2;
                     blocktype = 2;
                 }
                 else if (!isForeground[row][col])
                 {
-                    n = pow(2, n2);
+                    n = n2;
                     blocktype = 2;
                 }
                 else
@@ -382,10 +373,10 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
             else
             {
                 // default quantize as background if i frame
-                n = pow(2, n2);
+                n = n2;
                 blocktype = 0;
             }
-            for (int u = 0; u < bound; u++)
+            for (int u = 0; u < 8; u++)
             {
                 for (int v = 0; v < 8; v++)
                 {
@@ -403,7 +394,7 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
                     float g = 0;
                     float b = 0;
 
-                    for (int x = 0; x < bound; x++)
+                    for (int x = 0; x < 8; x++)
                     {
                         for (int y = 0; y < 8; y++)
                         {
@@ -417,20 +408,9 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
                     r = (r * c) / n;
                     g = (g * c) / n;
                     b = (b * c) / n;
-                    // if (bound == 8)
-                    //{
                     rblocks[blockIndex][u][v] = round(r);
                     gblocks[blockIndex][u][v] = round(g);
                     bblocks[blockIndex][u][v] = round(b);
-                    //}
-                    /*
-                    else {
-                        int bi = j / 8;
-                        rlblocks[bi][u][v] = r;
-                        glblocks[bi][u][v] = g;
-                        blblocks[bi][u][v] = b;
-                    }
-                    */
                 }
             }
         }
@@ -484,36 +464,6 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
             outputFile << "\n";
         }
     }
-    /*
-    // write the edge case 4x8 blocks
-    for (int y = 0; y < 120; y++)
-    {
-        int blocktype = 2;
-        for (int x = 0; x < 3; x++)
-        {
-            outputFile << blocktype << " ";
-            for (int u = 0; u < 4; u++)
-            {
-                for (int v = 0; v < 8; v++)
-                {
-                    if (x == 0)
-                    {
-                        outputFile << rlblocks[y][u][v] << " ";
-                    }
-                    else if (x == 1)
-                    {
-                        outputFile << glblocks[y][u][v] << " ";
-                    }
-                    else
-                    {
-                        outputFile << blblocks[y][u][v] << " ";
-                    }
-                }
-            }
-            outputFile << "\n";
-        }
-    }
-    */
 }
 
 /**Cosine Table Function**/
