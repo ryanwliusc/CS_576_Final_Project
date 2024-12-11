@@ -22,6 +22,7 @@ namespace fs = std::filesystem;
 // Global control flags
 ma_bool32 g_IsPaused = MA_FALSE;
 ma_bool32 g_Restart = MA_FALSE;
+ma_bool32 g_Stop = MA_FALSE; // Added for stopping audio playback
 
 // Audio position helper
 int getAudioPos(int index, int fps) {
@@ -31,7 +32,7 @@ int getAudioPos(int index, int fps) {
 // Miniaudio callback for audio playback
 void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount) {
     ma_decoder *pDecoder = (ma_decoder *)pDevice->pUserData;
-    if (pDecoder == nullptr) return;
+    if (pDecoder == nullptr || g_Stop) return;
 
     if (g_Restart) {
         ma_decoder_seek_to_pcm_frame(pDecoder, 0);
@@ -66,6 +67,8 @@ struct ControlState {
     int *index;
     int totalFrames;
     int width;
+    ma_decoder *decoder;
+    int fps;
 };
 
 void onMouse(int event, int x, int y, int flags, void *userdata) {
@@ -84,8 +87,10 @@ void onMouse(int event, int x, int y, int flags, void *userdata) {
         g_IsPaused = *(state->paused);
     } else if (isButtonClicked(click, stepForwardButton) && *(state->paused)) {
         *(state->index) = min(*(state->index) + 1, state->totalFrames - 1);
+        ma_decoder_seek_to_pcm_frame(state->decoder, *(state->index) * state->decoder->outputSampleRate / state->fps);
     } else if (isButtonClicked(click, stepBackButton) && *(state->paused)) {
         *(state->index) = max(*(state->index) - 1, 0);
+        ma_decoder_seek_to_pcm_frame(state->decoder, *(state->index) * state->decoder->outputSampleRate / state->fps);
     }
 }
 
@@ -167,7 +172,7 @@ int main(int argc, char **argv) {
     const auto frameDuration = chrono::nanoseconds(static_cast<int>(1e9 / fps));
     auto nextFrameTime = chrono::high_resolution_clock::now() + frameDuration;
 
-    ControlState state = {&paused, &index, totalFrames, width};
+    ControlState state = {&paused, &index, totalFrames, width, &decoder, fps};
     setMouseCallback("Player", onMouse, &state);
 
     while (true) {
@@ -190,6 +195,11 @@ int main(int argc, char **argv) {
             Mat frame(height, width, CV_8UC3, const_cast<uint8_t *>(frameData));
             cvtColor(frame, videoFrame, COLOR_RGB2BGR);
             videoFrame.copyTo(playerPanel(Rect(0, 0, width, height)));
+        }
+
+        if (index >= totalFrames) {
+            g_Stop = MA_TRUE; // Stop audio when video finishes
+            break;
         }
 
         createButtons(playerPanel, width);
