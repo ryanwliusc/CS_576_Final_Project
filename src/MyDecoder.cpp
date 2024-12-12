@@ -89,6 +89,18 @@ int main(int argc, char **argv)
     exit(1);
   }
 
+  /*Audio Stuff*/
+  ma_result result;
+  ma_decoder decoder;
+  ma_device_config deviceConfig;
+  ma_device device;
+
+  result = ma_decoder_init_file(audioPath.c_str(), NULL, &decoder);
+  if (result != MA_SUCCESS) {
+        cerr << "Could not load audio file" << endl;
+        exit(1);
+  }
+
   //Create Cosine Table (Having a cosine table might be faster, might not be, not sure) (What I did for assignment 3 -Colbert)
   cosTableU = outputCosineTableU(8,8);
   cosTableV = outputCosineTableV(8,8);
@@ -159,18 +171,6 @@ int main(int argc, char **argv)
   }
   //cout << "added: " << added << " more values to fill out 960x540" << endl;
   cout << "removed: " << added << " values to get to 960x536" << endl;
-
-  /*Audio Stuff*/
-  ma_result result;
-  ma_decoder decoder;
-  ma_device_config deviceConfig;
-  ma_device device;
-
-  result = ma_decoder_init_file(audioPath.c_str(), NULL, &decoder);
-  if (result != MA_SUCCESS) {
-        cout << "Could not load file" << endl;
-        //return -1;
-  }
 
   deviceConfig = ma_device_config_init(ma_device_type_playback);
   deviceConfig.playback.format   = decoder.outputFormat;      // Set to ma_format_unknown to use the device's native format.
