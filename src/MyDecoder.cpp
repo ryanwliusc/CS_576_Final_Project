@@ -360,7 +360,7 @@ void readDataThread(ifstream &inputFile, double n, double nn){
   int color = 0; //r = 0 g = 1 b = 2
   int type = -1;
   vector<vector<double>> bufBlock(8, vector<double>(8));
-  vector<vector<double>> IDCTBlock(8, vector<double>(8));
+  //vector<vector<double>> IDCTBlock(8, vector<double>(8));
   while(inputFile >> bufVal){
     //First value of each line is blocktype (foreground/background)
     type = static_cast<int> (bufVal);
@@ -369,7 +369,7 @@ void readDataThread(ifstream &inputFile, double n, double nn){
         //Parse line (64 more values), Dequantize then add to block
         inputFile >> bufVal;
         if (type == 0){
-          //iframe, not sure what to do here
+          //iframe
           bufVal *= n;
         } else if(type == 1){
           //foreground
@@ -381,25 +381,25 @@ void readDataThread(ifstream &inputFile, double n, double nn){
         bufBlock[i][j] = bufVal;
       }
     }
-    outputIDCTBlock(bufBlock, cosTableU, cosTableV, IDCTBlock);
+    //outputIDCTBlock(bufBlock, cosTableU, cosTableV, IDCTBlock);
     if (color == 0){
       {
         unique_lock<mutex> lock(redMut);
-        redQ.push_back(IDCTBlock);
+        redQ.push_back(bufBlock);
         lock.unlock();
       }
       cvRed.notify_one();
     } else if (color == 1){
       {
        unique_lock<mutex> lock(greenMut);
-        greenQ.push_back(IDCTBlock);
+        greenQ.push_back(bufBlock);
         lock.unlock();
       }
       cvGreen.notify_one();
     } else if (color == 2){
       {
         unique_lock<mutex> lock(blueMut);
-        blueQ.push_back(IDCTBlock);
+        blueQ.push_back(bufBlock);
         lock.unlock();
       }
       cvBlue.notify_one();
@@ -421,6 +421,7 @@ void redThread(vector<vector<double>> &red, int width){
   int offsetX = 0;
   int test = 0;
   bool nextRow = true;
+  vector<vector<double>> IDCTBlock(8, vector<double>(8));
   while(true){
     {
     unique_lock<mutex> lock(redMut);
@@ -429,12 +430,13 @@ void redThread(vector<vector<double>> &red, int width){
       break;
     } 
     vector<vector<double>> &bufBlock = redQ.front();
+    outputIDCTBlock(bufBlock, cosTableU, cosTableV, IDCTBlock);
     for (int i = 0; i < 8; i++){
       if(nextRow){
         red.push_back(vector<double>());
       }
       for (int j = 0; j < 8; j++){
-        red[i+offsetY].push_back(bufBlock[i][j]);
+        red[i+offsetY].push_back(IDCTBlock[i][j]);
       }
     }
     redQ.pop_front();
@@ -460,6 +462,7 @@ void greenThread(vector<vector<double>> &green, int width){
   int offsetX = 0;
   int test = 0;
   bool nextRow = true;
+  vector<vector<double>> IDCTBlock(8, vector<double>(8));
   while(true){
     {
     unique_lock<mutex> lock(greenMut);
@@ -468,12 +471,13 @@ void greenThread(vector<vector<double>> &green, int width){
       break;
     } 
     vector<vector<double>> &bufBlock = greenQ.front();
+    outputIDCTBlock(bufBlock, cosTableU, cosTableV, IDCTBlock);
     for (int i = 0; i < 8; i++){
       if(nextRow){
         green.push_back(vector<double>());
       }
       for (int j = 0; j < 8; j++){
-        green[i+offsetY].push_back(bufBlock[i][j]);
+        green[i+offsetY].push_back(IDCTBlock[i][j]);
       }
     }
     greenQ.pop_front();
@@ -499,6 +503,7 @@ void blueThread(vector<vector<double>> &blue, int width){
   int offsetX = 0;
   bool nextRow = true;
   int test = 0;
+  vector<vector<double>> IDCTBlock(8, vector<double>(8));
   while(true){
     {
     unique_lock<mutex> lock(blueMut);
@@ -507,12 +512,13 @@ void blueThread(vector<vector<double>> &blue, int width){
       break;
     }
     vector<vector<double>>  &bufBlock = blueQ.front();
+    outputIDCTBlock(bufBlock, cosTableU, cosTableV, IDCTBlock);
     for (int i = 0; i < 8; i++){
       if(nextRow){
         blue.push_back(vector<double>());
       }
       for (int j = 0; j < 8; j++){
-        blue[i+offsetY].push_back(bufBlock[i][j]);
+        blue[i+offsetY].push_back(IDCTBlock[i][j]);
       }
     }
     blueQ.pop_front();
