@@ -383,11 +383,11 @@ void dctEncode(int width, int height, vector<unsigned char> currFrame, ofstream 
                     float cu = 1, cv = 1;
                     if (u == 0)
                     {
-                        cu = 1 / sqrt(2);
+                        cu = .70710677;
                     }
                     if (v == 0)
                     {
-                        cv = 1 / sqrt(2);
+                        cv = .70710677;
                     }
                     float c = .25 * cu * cv;
                     float r = 0;
