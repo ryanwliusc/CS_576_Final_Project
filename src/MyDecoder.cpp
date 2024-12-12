@@ -41,26 +41,26 @@ struct ControlState {
 };
 
 //Multithread section
-deque<vector<vector<double>>> redQ;
-deque<vector<vector<double>>> greenQ;
-deque<vector<vector<double>>> blueQ;
+deque<vector<vector<float>>> redQ;
+deque<vector<vector<float>>> greenQ;
+deque<vector<vector<float>>> blueQ;
 mutex redMut, greenMut, blueMut;
 condition_variable cvRed, cvGreen, cvBlue;
 atomic<bool> dataExists(true);
 
-vector<vector<double>> cosTableU;
-vector<vector<double>> cosTableV;
+vector<vector<float>> cosTableU;
+vector<vector<float>> cosTableV;
 
-void outputIDCTBlock(vector<vector<double>> &ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV, vector<vector<double>> &outBlock);
+void outputIDCTBlock(vector<vector<float>> &ogBlock, vector<vector<float>> cosTableU, vector<vector<float>> cosTableV, vector<vector<float>> &outBlock);
 //Function for CosineTables
-vector<vector<double>> outputCosineTableV(int sizeY, int sizeX);
-vector<vector<double>> outputCosineTableU(int sizeY, int sizeX);
-vector<unsigned char> to1D(vector<vector<double>> &output2D);
+vector<vector<float>> outputCosineTableV(int sizeY, int sizeX);
+vector<vector<float>> outputCosineTableU(int sizeY, int sizeX);
+vector<unsigned char> to1D(vector<vector<vector<float>>> &output2D);
 vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned char> green, vector<unsigned char> blue);
-void readDataThread(ifstream &inputFile, double n, double nn);
-void redThread(vector<vector<double>> &red, int width);
-void greenThread(vector<vector<double>> &green, int width);
-void blueThread(vector<vector<double>> &blue, int width);
+void readDataThread(ifstream &inputFile, float n, float nn);
+void redThread(vector<vector<vector<float>>> &red, int width, int height);
+void greenThread(vector<vector<vector<float>>> &green, int width, int height);
+void blueThread(vector<vector<vector<float>>> &blue, int width, int height);
 
 void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount);
 void createButtons(Mat &playerPanel, int width);
@@ -111,16 +111,16 @@ int main(int argc, char **argv)
   int n2;
   inputFile >> n1 >> n2; //Parsed n1 and n2
 
-  vector<vector<double>> redStream2D;
-  vector<vector<double>> greenStream2D;
-  vector<vector<double>> blueStream2D;
-  double n = pow(2, n1);
-  double nn = pow(2, n2);
+  vector<vector<vector<float>>> redFrames;
+  vector<vector<vector<float>>> greenFrames;
+  vector<vector<vector<float>>> blueFrames;
+  float n = pow(2, n1);
+  float nn = pow(2, n2);
 
   thread fileRead(readDataThread, ref(inputFile), n, nn);
-  thread rThread(redThread, ref(redStream2D), width);
-  thread gThread(greenThread, ref(greenStream2D), width);
-  thread bThread(blueThread, ref(blueStream2D), width);
+  thread rThread(redThread, ref(redFrames), width, height);
+  thread gThread(greenThread, ref(greenFrames), width, height);
+  thread bThread(blueThread, ref(blueFrames), width, height);
   
 
   if(rThread.joinable()){
@@ -143,9 +143,9 @@ int main(int argc, char **argv)
   vector<unsigned char> redStream;
   vector<unsigned char> greenStream;
   vector<unsigned char> blueStream;
-  redStream = to1D(redStream2D);
-  greenStream = to1D(greenStream2D);
-  blueStream = to1D(blueStream2D);
+  redStream = to1D(redFrames);
+  greenStream = to1D(greenFrames);
+  blueStream = to1D(blueFrames);
   cout<<"to 1D done" << endl;
   
   vector<unsigned char> RGBStream = transferInData(redStream, greenStream, blueStream);
@@ -287,37 +287,37 @@ int main(int argc, char **argv)
 
 
 /**Function to output 8x8 IDCT block --Colbert**/ 
-void outputIDCTBlock(vector<vector<double>> &ogBlock, vector<vector<double>> cosTableU, vector<vector<double>> cosTableV, vector<vector<double>> &outBlock) {
-    //vector<vector<double>> block(8, vector<double>(8));
+void outputIDCTBlock(vector<vector<float>> &ogBlock, vector<vector<float>> cosTableU, vector<vector<float>> cosTableV, vector<vector<float>> &outBlock) {
+    //vector<vector<float>> block(8, vector<float>(8));
     // Do the equation
-    double sum;
-    double CU;
-    double CV;
+    float sum;
+    float CU;
+    float CV;
     for (int y = 0; y < 8; y++) {
         for (int x = 0; x < 8; x++) {
           sum = 0.0;
             for (int v = 0; v < 8; v++) {
                 for (int u = 0; u < 8; u++) {
                     if (u == 0) {
-                        CU = 1.0 / (sqrt(2.0));
+                        CU = .70710677;
                     } else {
                         CU = 1.0;
                     }
                     if (v == 0) {
-                        CV = 1.0 / (sqrt(2.0));
+                        CV = .70710677;
                     } else {
                         CV = 1.0;
                     }
                     sum += CU * CV * ogBlock[v][u] * cosTableU[u][x] * cosTableV[v][y];
                 }
             }
-            outBlock[y][x] = static_cast<double> (clamp((sum * 0.25), 0.0, 255.0));
+            outBlock[y][x] = static_cast<float> (clamp((sum * 0.25), 0.0, 255.0));
         }
     }
 }
 /**Cosine Table Function**/
-vector<vector<double>> outputCosineTableV(int sizeY, int sizeX){
-  vector<vector<double>> table(sizeY, vector<double>(sizeX));
+vector<vector<float>> outputCosineTableV(int sizeY, int sizeX){
+  vector<vector<float>> table(sizeY, vector<float>(sizeX));
   for (int v = 0; v < sizeY; v++) {
       for (int y = 0; y < sizeY; y++) {
           table[v][y] = cos((2.0 * y + 1.0) * v * M_PI / 16.0);
@@ -325,8 +325,8 @@ vector<vector<double>> outputCosineTableV(int sizeY, int sizeX){
       }
   return table;
 }
-vector<vector<double>> outputCosineTableU(int sizeY, int sizeX){
-  vector<vector<double>> table(sizeY, vector<double>(sizeX));
+vector<vector<float>> outputCosineTableU(int sizeY, int sizeX){
+  vector<vector<float>> table(sizeY, vector<float>(sizeX));
     for (int u = 0; u < sizeX; u++) {
         for (int x = 0; x < sizeX; x++) {
           table[u][x] = cos((2.0 * x + 1.0) * u * M_PI / 16.0);
@@ -334,13 +334,16 @@ vector<vector<double>> outputCosineTableU(int sizeY, int sizeX){
       }
   return table;
 }
-vector<unsigned char> to1D(vector<vector<double>> &output2D){
+vector<unsigned char> to1D(vector<vector<vector<float>>> &output2D){
   vector<unsigned char> buf;
-  for (int i = 0; i < output2D.size(); i++){
-    for (int j = 0; j < output2D[i].size(); j++){
-      buf.push_back(static_cast<unsigned char>((output2D[i][j])));
+  for (int frameIndex = 0; frameIndex < output2D.size(); frameIndex++){
+      for (int i = 0; i < output2D[frameIndex].size(); i++){
+        for (int j = 0; j < output2D[frameIndex][i].size(); j++){
+          buf.push_back(static_cast<unsigned char>((output2D[frameIndex][i][j])));
+        }
     }
   }
+
   return buf;
 }
 vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned char> green, vector<unsigned char> blue){
@@ -355,12 +358,12 @@ vector<unsigned char> transferInData(vector<unsigned char> red, vector<unsigned 
   }
   return inData;
 }
-void readDataThread(ifstream &inputFile, double n, double nn){
-  double bufVal;
+void readDataThread(ifstream &inputFile, float n, float nn){
+  float bufVal;
   int color = 0; //r = 0 g = 1 b = 2
   int type = -1;
-  vector<vector<double>> bufBlock(8, vector<double>(8));
-  //vector<vector<double>> IDCTBlock(8, vector<double>(8));
+  vector<vector<float>> bufBlock(8, vector<float>(8));
+  //vector<vector<float>> IDCTBlock(8, vector<float>(8));
   while(inputFile >> bufVal){
     //First value of each line is blocktype (foreground/background)
     type = static_cast<int> (bufVal);
@@ -415,13 +418,15 @@ void readDataThread(ifstream &inputFile, double n, double nn){
   cvGreen.notify_one();
   cvBlue.notify_one();
 }
-void redThread(vector<vector<double>> &red, int width){
+void redThread(vector<vector<vector<float>>> &red, int width, int height){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
-  int test = 0;
+  int frameI = 1;
   bool nextRow = true;
-  vector<vector<double>> IDCTBlock(8, vector<double>(8));
+  int nextFrame = false; 
+  vector<vector<float>> IDCTBlock(8, vector<float>(8));
+  vector<vector<float>> frame(height, vector<float>(width));
   while(true){
     {
     unique_lock<mutex> lock(redMut);
@@ -429,40 +434,49 @@ void redThread(vector<vector<double>> &red, int width){
     if (redQ.empty() && !dataExists){
       break;
     } 
-    vector<vector<double>> &bufBlock = redQ.front();
+    vector<vector<float>> &bufBlock = redQ.front();
     outputIDCTBlock(bufBlock, cosTableU, cosTableV, IDCTBlock);
-    for (int i = 0; i < 8; i++){
-      if(nextRow){
-        red.push_back(vector<double>());
-      }
+    if (offsetY < height && offsetX < width){
+      for (int i = 0; i < 8; i++){
       for (int j = 0; j < 8; j++){
-        red[i+offsetY].push_back(IDCTBlock[i][j]);
+        frame[i + offsetY][j + offsetX] = IDCTBlock[i][j];
       }
     }
+    }
+    if (nextFrame){
+      red.push_back(frame);
+      nextFrame = false; 
+      frameI++;
+    }
+    
     redQ.pop_front();
     }
     offsetX += 8;
-    //cout << "Consumed: Red" << " ---" << test << endl;
     if (offsetX >= width){
       offsetX = 0;
-      offsetY += 7;
-      nextRow = true;
-    } else {
-      nextRow = false;
+      offsetY += 8;
     }
-    if (test % 80000 == 0){
-      cout << "Red Check: " << offsetY << endl;
+    if (offsetY >= height){
+      nextFrame = true;
+      offsetX = 0;
+      offsetY = 0;
     }
-    test++;
+    
+    if (frameI % 30 == 0){
+      cout << "Red Check: " << frameI << endl;
+      frameI++;
+    }
   }
 }
-void greenThread(vector<vector<double>> &green, int width){
+void greenThread(vector<vector<vector<float>>> &green, int width, int height){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
-  int test = 0;
+  int frameI = 1;
   bool nextRow = true;
-  vector<vector<double>> IDCTBlock(8, vector<double>(8));
+  int nextFrame = false; 
+  vector<vector<float>> IDCTBlock(8, vector<float>(8));
+  vector<vector<float>> frame(height, vector<float>(width));
   while(true){
     {
     unique_lock<mutex> lock(greenMut);
@@ -470,40 +484,46 @@ void greenThread(vector<vector<double>> &green, int width){
     if (greenQ.empty() && !dataExists){
       break;
     } 
-    vector<vector<double>> &bufBlock = greenQ.front();
+    vector<vector<float>> &bufBlock = greenQ.front();
     outputIDCTBlock(bufBlock, cosTableU, cosTableV, IDCTBlock);
-    for (int i = 0; i < 8; i++){
-      if(nextRow){
-        green.push_back(vector<double>());
-      }
+    if (offsetY < height && offsetX < width){
+      for (int i = 0; i < 8; i++){
       for (int j = 0; j < 8; j++){
-        green[i+offsetY].push_back(IDCTBlock[i][j]);
+        frame[i + offsetY][j + offsetX] = IDCTBlock[i][j];
       }
+    }
+    }
+        if (nextFrame){
+      green.push_back(frame);
+      nextFrame = false; 
+      frameI++;
     }
     greenQ.pop_front();
     }
     offsetX += 8;
-    //cout << "Consumed: Green" << " ---" << test << endl;
     if (offsetX >= width){
       offsetX = 0;
-      offsetY += 7;
-      nextRow = true;
-    } else {
-      nextRow = false;
+      offsetY += 8;
     }
-    if (test % 80000 == 0){
-      cout << "Green Check: " << offsetY << endl;
+    if (offsetY >= height){
+      nextFrame = true;
+      offsetX = 0;
+      offsetY = 0;
     }
-    test++;
+    if (frameI % 30 == 0){
+      cout << "Green Check: " << frameI << endl;
+      frameI++;
+    }
   }
 }
-void blueThread(vector<vector<double>> &blue, int width){
+void blueThread(vector<vector<vector<float>>> &blue, int width, int height){
   this_thread::sleep_for(chrono::milliseconds(1000));
   int offsetY = 0;
   int offsetX = 0;
-  bool nextRow = true;
-  int test = 0;
-  vector<vector<double>> IDCTBlock(8, vector<double>(8));
+  int frameI = 1;
+  int nextFrame = false; 
+  vector<vector<float>> IDCTBlock(8, vector<float>(8));
+  vector<vector<float>> frame(height, vector<float>(width));
   while(true){
     {
     unique_lock<mutex> lock(blueMut);
@@ -511,31 +531,36 @@ void blueThread(vector<vector<double>> &blue, int width){
     if (blueQ.empty() && !dataExists){
       break;
     }
-    vector<vector<double>>  &bufBlock = blueQ.front();
+    vector<vector<float>>  &bufBlock = blueQ.front();
     outputIDCTBlock(bufBlock, cosTableU, cosTableV, IDCTBlock);
-    for (int i = 0; i < 8; i++){
-      if(nextRow){
-        blue.push_back(vector<double>());
-      }
+    if (offsetY < height && offsetX < width){
+      for (int i = 0; i < 8; i++){
       for (int j = 0; j < 8; j++){
-        blue[i+offsetY].push_back(IDCTBlock[i][j]);
+        frame[i + offsetY][j + offsetX] = IDCTBlock[i][j];
       }
+    }
+    }
+      if (nextFrame){
+      blue.push_back(frame);
+      nextFrame = false; 
+      frameI++;
     }
     blueQ.pop_front();
     }
     offsetX += 8;
-    //cout << "Consumed: Blue" << " ---" << test << endl;
     if (offsetX >= width){
       offsetX = 0;
-      offsetY += 7;
-      nextRow = true;
-    } else {
-      nextRow = false;
+      offsetY += 8;
     }
-    if (test % 80000 == 0){
-      cout << "Blue Check: " << offsetY << endl;
+    if (offsetY >= height){
+      nextFrame = true;
+      offsetX = 0;
+      offsetY = 0;
     }
-    test++;
+    if (frameI % 30 == 0){
+      cout << "Blue Check: " << frameI << endl;
+      frameI++;
+    }
   }
 }
 void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount) {
